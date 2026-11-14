@@ -12,7 +12,17 @@ import pytest
 import spiceypy as spice
 
 from pipeline import kernels
-from pipeline.ephem import R_MOON_KM, Site, enu_basis, load_sites, observe, site_vector
+from pipeline.ephem import (
+    R_MOON_KM,
+    Site,
+    enu_basis,
+    load_sites,
+    longest_run,
+    observe,
+    observe_exact,
+    runs,
+    site_vector,
+)
 
 pytestmark = pytest.mark.skipif(
     bool(kernels.missing_kernels()),
@@ -111,6 +121,27 @@ def test_sun_distance_is_one_au():
 
     assert 1.45e8 < track.distance.mean() < 1.55e8  # km
     assert track.ang_radius.mean() == pytest.approx(0.266, abs=0.01)
+
+
+@pytest.mark.parametrize("body", ["SUN", "EARTH"])
+def test_fast_observe_matches_spkcpo(body):
+    """Vector path (Moon centre minus point) = spkcpo with a surface observer."""
+    site = Site("s", "site", lat=-85.43, lon=31.74, elev=6399.0)
+    ets = ets_for("2026-03-01", days=40, step_min=720)
+    fast = observe(site, ets, body)
+    exact = observe_exact(site, ets, body)
+    assert np.abs(fast.alt - exact.alt).max() < 1e-4  # deg, ~0.4″
+    daz = (fast.az - exact.az + 180) % 360 - 180
+    assert np.abs(daz).max() < 1e-3
+
+
+def test_runs_and_longest_run():
+    mask = np.array([0, 1, 1, 0, 1, 1, 1, 0, 0, 1], dtype=bool)
+    starts, lengths = runs(mask)
+    assert starts.tolist() == [1, 4, 9]
+    assert lengths.tolist() == [2, 3, 1]
+    assert longest_run(mask, step_s=3600) == 3.0
+    assert longest_run(np.zeros(5, bool), 3600) == 0.0
 
 
 def test_sites_yaml_is_sane():

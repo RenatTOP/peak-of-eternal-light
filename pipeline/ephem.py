@@ -130,32 +130,53 @@ def enu_basis(site_vec: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]
     return east, north, up
 
 
-def observe(site: Site, ets: np.ndarray, body: str) -> Track:
-    """Alt/az of `body` from `site` at times `ets`."""
-    obs_pos = site_vector(site)
-    east, north, up = enu_basis(obs_pos)
+_BODY_CACHE: dict[tuple, np.ndarray] = {}
 
+
+def body_positions(body: str, ets: np.ndarray) -> np.ndarray:
+    """Body position relative to the Moon's centre in MOON_ME, km, shape (n, 3).
+
+    Computed once per time grid and reused for every point:
+    topocentric vector = this minus the point's position vector. Parallax is
+    exact; the difference from spkcpo (light time/aberration for a surface point
+    instead of the centre) is microarcseconds, see tests/test_ephem.py.
+    """
+    key = (body, float(ets[0]), float(ets[-1]), len(ets))
+    if key not in _BODY_CACHE:
+        if len(_BODY_CACHE) > 16:
+            _BODY_CACHE.clear()
+        pos, _lt = spice.spkpos(body, np.asarray(ets, dtype=float), FRAME, ABCORR, CENTER)
+        _BODY_CACHE[key] = np.asarray(pos, dtype=float).reshape(-1, 3)
+    return _BODY_CACHE[key]
+
+
+def _track(body: str, ets: np.ndarray, vec: np.ndarray, site_vec: np.ndarray) -> Track:
+    east, north, up = enu_basis(site_vec)
+    dist = np.linalg.norm(vec, axis=1)
+    unit = vec / dist[:, None]
+    alt = np.degrees(np.arcsin(np.clip(unit @ up, -1.0, 1.0)))
+    az = np.degrees(np.arctan2(unit @ east, unit @ north)) % 360.0
     body_radius_km = float(np.mean(spice.bodvrd(body, "RADII", 3)[1]))
+    ang_radius = np.degrees(np.arcsin(np.clip(body_radius_km / dist, -1.0, 1.0)))
+    return Track(body=body, et=ets, alt=alt, az=az, distance=dist, ang_radius=ang_radius)
 
-    n = len(ets)
-    alt = np.empty(n)
-    az = np.empty(n)
-    dist = np.empty(n)
 
+def observe(site: Site, ets: np.ndarray, body: str) -> Track:
+    """Alt/az of `body` from `site` at times `ets` (fast, vectorised)."""
+    obs_pos = site_vector(site)
+    return _track(body, ets, body_positions(body, ets) - obs_pos, obs_pos)
+
+
+def observe_exact(site: Site, ets: np.ndarray, body: str) -> Track:
+    """Same via spkcpo with a surface observer, the reference for tests."""
+    obs_pos = site_vector(site)
+    vec = np.empty((len(ets), 3))
     for i, et in enumerate(ets):
         state, _lt = spice.spkcpo(
             body, float(et), FRAME, "OBSERVER", ABCORR, obs_pos, CENTER, FRAME
         )
-        vec = np.asarray(state[:3])
-        r = np.linalg.norm(vec)
-        unit = vec / r
-
-        alt[i] = np.degrees(np.arcsin(np.dot(unit, up)))
-        az[i] = np.degrees(np.arctan2(np.dot(unit, east), np.dot(unit, north))) % 360.0
-        dist[i] = r
-
-    ang_radius = np.degrees(np.arcsin(np.clip(body_radius_km / dist, -1.0, 1.0)))
-    return Track(body=body, et=ets, alt=alt, az=az, distance=dist, ang_radius=ang_radius)
+        vec[i] = state[:3]
+    return _track(body, ets, vec, obs_pos)
 
 
 # --------------------------------------------------------------------------- #
@@ -163,15 +184,18 @@ def observe(site: Site, ets: np.ndarray, body: str) -> Track:
 # --------------------------------------------------------------------------- #
 
 
+def runs(mask: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Starts and lengths (in steps) of contiguous mask == True runs."""
+    m = np.concatenate(([False], np.asarray(mask, dtype=bool), [False]))
+    edges = np.flatnonzero(np.diff(m.astype(np.int8)))
+    starts, ends = edges[::2], edges[1::2]
+    return starts, ends - starts
+
+
 def longest_run(mask: np.ndarray, step_s: float) -> float:
     """Longest contiguous mask == True run, in hours."""
-    if not mask.any():
-        return 0.0
-    best = run = 0
-    for value in mask:
-        run = run + 1 if value else 0
-        best = max(best, run)
-    return best * step_s / 3600.0
+    _, lengths = runs(mask)
+    return float(lengths.max()) * step_s / 3600.0 if len(lengths) else 0.0
 
 
 def summarize(track: Track, step_s: float) -> dict[str, float]:
