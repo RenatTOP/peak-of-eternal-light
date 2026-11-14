@@ -140,7 +140,7 @@ def hillshade(z: np.ndarray, res: float) -> np.ndarray:
     aspect = np.arctan2(-gx, gy)
     az, alt = np.radians(315.0), np.radians(40.0)
     shade = np.sin(alt) * np.cos(slope) + np.cos(alt) * np.sin(slope) * np.cos(az - aspect)
-    out = np.clip(shade * 255, 1, 255)
+    out = np.nan_to_num(np.clip(shade * 255, 1, 255), nan=0.0)
     out[~np.isfinite(z)] = 0
     return out.astype(np.uint8)
 
@@ -301,12 +301,17 @@ def build_closeups() -> None:
                 source = "LROC NAC orthomosaic (Bertone et al., SfS)"
         if img is None:
             stack = DemStack.for_site(site)
-            layer = next(stack.layers[k] for k in ("sfs", "lola5", "r20", "r30", "r40", "r120")
-                         if k in stack.layers)
             xs = np.linspace(bounds[0], bounds[2], CLOSEUP_PX)
             ys = np.linspace(bounds[3], bounds[1], CLOSEUP_PX)
             gx, gy = np.meshgrid(xs, ys)
-            zz = layer.sample(gx, gy)
+            # first layer that really covers the area (e.g. the 30 m map only reaches 75°S)
+            for k in ("sfs", "lola5", "r20", "r30", "r40", "r120"):
+                if k not in stack.layers:
+                    continue
+                zz = stack.layers[k].sample(gx, gy)
+                if np.isfinite(zz).mean() > 0.95:
+                    layer = stack.layers[k]
+                    break
             img = hillshade(zz, (bounds[2] - bounds[0]) / CLOSEUP_PX)
             source = f"hillshade, LOLA {layer.res:.0f} m"
         Image.fromarray(img).save(cdir / f"{site.id}.jpg", quality=84, optimize=True)
