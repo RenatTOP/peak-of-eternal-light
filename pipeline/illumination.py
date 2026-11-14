@@ -101,6 +101,48 @@ def metrics(v: Visibility) -> dict[str, float]:
     }
 
 
+@dataclass
+class TimeWindow:
+    start_et: float
+    end_et: float
+
+    @property
+    def hours(self) -> float:
+        return (self.end_et - self.start_et) / 3600.0
+
+    def utc(self, which: str = "start") -> str:
+        from .ephem import SPICE_LOCK
+
+        with SPICE_LOCK:
+            return spice.et2utc(self.start_et if which == "start" else self.end_et, "ISOC", 0)
+
+    def to_json(self) -> dict:
+        return {"start": self.utc("start"), "end": self.utc("end"), "hours": round(self.hours, 2)}
+
+
+def windows(mask: np.ndarray, ets: np.ndarray) -> list[TimeWindow]:
+    """Contiguous mask == True runs as windows [start, end) in ET.
+
+    Edge accuracy is one time step; a run hitting the end of the period
+    is cut by it.
+    """
+    step = float(ets[1] - ets[0])
+    starts, lengths = runs(mask)
+    return [TimeWindow(float(ets[s]), float(ets[s]) + n * step) for s, n in zip(starts, lengths)]
+
+
+def mission_windows(v: Visibility) -> dict[str, list[TimeWindow]]:
+    """Windows for planning: light, direct link, both, night."""
+    lit = v.sun_frac > 0.0
+    earth = v.earth_frac > 0.0
+    return {
+        "sun": windows(lit, v.ets),
+        "earth": windows(earth, v.ets),
+        "sun_and_earth": windows(lit & earth, v.ets),
+        "night": windows(~lit, v.ets),
+    }
+
+
 # --------------------------------------------------------------------------- #
 # reference maps
 # --------------------------------------------------------------------------- #

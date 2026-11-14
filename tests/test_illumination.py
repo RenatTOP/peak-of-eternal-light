@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from pipeline.horizon import DemStack, Raster, latlon_to_xy
-from pipeline.illumination import disc_fraction
+from pipeline.illumination import disc_fraction, windows
 from pipeline.refine import candidates
 
 
@@ -33,6 +33,14 @@ def test_disc_fraction_known_segment():
     hidden = (np.arccos(0.5) - 0.5 * np.sqrt(0.75)) / np.pi
     assert hidden == pytest.approx(0.1955, abs=1e-4)
     assert disc_fraction(0.5, r) == pytest.approx(1 - hidden)
+
+
+def test_windows_from_mask():
+    ets = np.arange(10) * 3600.0
+    mask = np.array([1, 1, 0, 0, 1, 1, 1, 0, 0, 1], dtype=bool)
+    w = windows(mask, ets)
+    assert [(x.start_et / 3600, x.hours) for x in w] == [(0, 2), (4, 3), (9, 1)]
+    assert windows(np.zeros(10, bool), ets) == []
 
 
 def test_candidates_prefer_flat_high_ground_over_steep_peak():

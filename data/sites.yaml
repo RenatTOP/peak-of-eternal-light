@@ -168,6 +168,24 @@ sites:
       Intuitive Machines IM-2 landing site (6 March 2025, CLPS). The lander came
       down intact but on its side. Outside the 5 m tiles: 20 m DEM only.
 
+  - id: im1-odysseus
+    name: IM-1 Odysseus landing site
+    lat: -80.13
+    lon: 1.44
+    elev: 2592
+    note: |
+      Intuitive Machines IM-1 (22 February 2024, CLPS), near Malapert A crater.
+      20-30 m terrain. By our calculation the Sun set there on 2 March 2024.
+
+  - id: chandrayaan-3
+    name: Chandrayaan-3 Vikram landing site
+    lat: -69.373
+    lon: 32.319
+    elev: 529
+    note: |
+      ISRO, 23 August 2023. 120 m terrain only. Our calculation: sunset
+      4 September 2023 (ISRO put Vikram to sleep that day), sunrise 19-20 September.
+
   # --- contrast: permanent shadow -----------------------------------------
   # The Haworth and Shoemaker tiles are sites next to the craters, not their floors:
   # only 2-5% of the area within 15 km is permanently shadowed. The point here is

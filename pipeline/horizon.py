@@ -42,10 +42,14 @@ R_MOON_M = 1_737_400.0
 OUT_DIR = ROOT / "out" / "horizon"
 
 REGIONAL = {
-    "r20": DEM_REGIONAL / "LDEM_80S_20MPP_ADJ.TIF",
-    "r40": DEM_REGIONAL / "LDEM_80S_40MPP_ADJ.TIF",
-    "r120": DEM_REGIONAL / "LDEM_60S_120MPP_ADJ.TIF",
+    "r20": DEM_REGIONAL / "LDEM_80S_20MPP_ADJ.TIF",  # 80-90°S
+    "r30": DEM_REGIONAL / "LDEM_75S_30MPP_ADJ.TIF",  # 75-90°S
+    "r40": DEM_REGIONAL / "LDEM_80S_40MPP_ADJ.TIF",  # 80-90°S
+    "r120": DEM_REGIONAL / "LDEM_60S_120MPP_ADJ.TIF",  # 60-90°S
 }
+
+# Northernmost latitude with terrain (edge of LDEM_60S)
+MIN_LAT_COVERED = -60.0
 
 SFS_BY_PREFIX = {r.prefix: r for r in SFS_REGIONS}
 
@@ -58,15 +62,39 @@ class Band:
     sources: tuple[str, ...]
 
 
+# Layers within a band by priority; where one ends (NaN) the next is used.
+# So at 70°S near terrain comes from the 120 m map, at 89° from SfS.
 BANDS: tuple[Band, ...] = (
-    Band(10.0, 10_000.0, 5.0, ("sfs", "lola5", "r20")),
-    Band(10_000.0, 60_000.0, 20.0, ("r20", "r120")),
-    Band(60_000.0, 150_000.0, 40.0, ("r40", "r120")),
+    Band(10.0, 10_000.0, 5.0, ("sfs", "lola5", "r20", "r30", "r120")),
+    Band(10_000.0, 60_000.0, 20.0, ("r20", "r30", "r120")),
+    Band(60_000.0, 150_000.0, 40.0, ("r40", "r30", "r120")),
     Band(150_000.0, 300_000.0, 120.0, ("r120",)),
 )
 
 # how much regional terrain to take around the point (with a margin for point grids)
-WINDOW_RADIUS = {"r20": 65_000.0, "r40": 155_000.0, "r120": 305_000.0}
+WINDOW_RADIUS = {"r20": 65_000.0, "r30": 155_000.0, "r40": 155_000.0, "r120": 305_000.0}
+
+_BOUNDS_CACHE: dict[Path, tuple[float, float, float, float]] = {}
+
+
+def file_bounds(path: Path) -> tuple[float, float, float, float]:
+    if path not in _BOUNDS_CACHE:
+        with rasterio.open(path) as ds:
+            _BOUNDS_CACHE[path] = tuple(ds.bounds)
+    return _BOUNDS_CACHE[path]
+
+
+def _inside(path: Path, x: float, y: float, margin: float = 0.0) -> bool:
+    left, bottom, right, top = file_bounds(path)
+    return left + margin <= x <= right - margin and bottom + margin <= y <= top - margin
+
+
+def fine_layers_at(x: float, y: float) -> tuple[str | None, str | None]:
+    """SfS region and LOLA 5 m tile containing the point (or None)."""
+    sfs = next((r.prefix for r in SFS_REGIONS if r.available and _inside(r.elev, x, y)), None)
+    tile = next((t.tile for t in SITE_TILES_BY_NAME.values()
+                 if t.product("surf").exists() and _inside(t.product("surf"), x, y)), None)
+    return sfs, tile
 
 
 # --------------------------------------------------------------------------- #
@@ -179,21 +207,36 @@ class DemStack:
 
     @classmethod
     def for_site(cls, site: Site, verbose: bool = False) -> "DemStack":
+        """Terrain around a point. If the site has no sfs/tile, find them."""
+        if site.lat > MIN_LAT_COVERED:
+            raise ValueError(
+                f"{site.lat:.2f}° is outside terrain coverage (only {MIN_LAT_COVERED:.0f}..-90°)")
         cx, cy = latlon_to_xy(site.lat, site.lon)
         stack = cls()
         t0 = time.monotonic()
 
-        if site.sfs and site.sfs in SFS_BY_PREFIX and SFS_BY_PREFIX[site.sfs].available:
-            stack.layers["sfs"] = read_raster(SFS_BY_PREFIX[site.sfs].elev, "sfs")
-        if site.tile and site.tile in SITE_TILES_BY_NAME:
-            path = SITE_TILES_BY_NAME[site.tile].product("surf")
+        sfs, tile = site.sfs, site.tile
+        if sfs is None and tile is None:
+            sfs, tile = fine_layers_at(cx, cy)
+        if sfs and sfs in SFS_BY_PREFIX and SFS_BY_PREFIX[sfs].available:
+            stack.layers["sfs"] = read_raster(SFS_BY_PREFIX[sfs].elev, "sfs")
+        if tile and tile in SITE_TILES_BY_NAME:
+            path = SITE_TILES_BY_NAME[tile].product("surf")
             if path.exists():
                 stack.layers["lola5"] = read_raster(path, "lola5")
+
         for name, path in REGIONAL.items():
-            if path.exists():
-                r = read_raster(path, name, (cx, cy), WINDOW_RADIUS[name])
-                if r is not None:
-                    stack.layers[name] = r
+            if not path.exists():
+                continue
+            # the 30 m map is needed only where the 20/40 m ones (to 80°S) don't cover the window
+            if name == "r30" and all(
+                _inside(REGIONAL[n], cx, cy, margin=WINDOW_RADIUS[n])
+                for n in ("r20", "r40") if REGIONAL[n].exists()
+            ):
+                continue
+            r = read_raster(path, name, (cx, cy), WINDOW_RADIUS[name])
+            if r is not None:
+                stack.layers[name] = r
 
         if verbose:
             mb = sum(r.z.nbytes for r in stack.layers.values()) / 2**20
@@ -232,7 +275,7 @@ class DemStack:
 
     def surface(self, x: float, y: float) -> tuple[float, str]:
         """Surface height at a point from the most accurate layer, and that layer's name."""
-        for name in ("sfs", "lola5", "r20", "r40", "r120"):
+        for name in ("sfs", "lola5", "r20", "r30", "r40", "r120"):
             layer = self.layers.get(name)
             if layer is None:
                 continue
@@ -261,6 +304,7 @@ class Horizon:
     elev: np.ndarray  # horizon elevation, deg
     dist: np.ndarray  # distance to the terrain setting the horizon, m
     compute_s: float = 0.0
+    missing_pct: float = 0.0  # share of ray points with no terrain at all (coverage edge)
 
     def at(self, az_deg: np.ndarray) -> np.ndarray:
         """Horizon elevation at arbitrary azimuths (linear, periodic)."""
@@ -275,7 +319,8 @@ class Horizon:
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         meta = {k: getattr(self, k) for k in
-                ("site_id", "lat", "lon", "x", "y", "ground_z", "height", "ground_source", "compute_s")}
+                ("site_id", "lat", "lon", "x", "y", "ground_z", "height", "ground_source",
+                 "compute_s", "missing_pct")}
         np.savez_compressed(path, az=self.az, elev=self.elev, dist=self.dist, meta=json.dumps(meta))
 
     @classmethod
@@ -316,6 +361,7 @@ def compute_horizon(stack: DemStack, x: float, y: float, height: float = 2.0,
 
     best = np.full(n_az, -90.0)
     best_d = np.zeros(n_az)
+    n_missing = n_total = 0
 
     for band in bands:
         d = np.arange(band.d_min, band.d_max, band.step)
@@ -324,6 +370,8 @@ def compute_horizon(stack: DemStack, x: float, y: float, height: float = 2.0,
             X = x + dirs[sl, 0:1] * d
             Y = y + dirs[sl, 1:2] * d
             Z = stack.height(X, Y, band.sources)
+            n_missing += int(np.isnan(Z).sum())
+            n_total += Z.size
             px, py, pz = xyz_from_map(X, Y, Z)
             vx, vy, vz = px - p0[0], py - p0[1], pz - p0[2]
             norm = np.sqrt(vx * vx + vy * vy + vz * vz)
@@ -338,7 +386,8 @@ def compute_horizon(stack: DemStack, x: float, y: float, height: float = 2.0,
 
     lat, lon = xy_to_latlon(x, y)
     return Horizon(site_id, float(lat), float(lon), x, y, z0, height, source,
-                   az, best, best_d, time.monotonic() - t0)
+                   az, best, best_d, time.monotonic() - t0,
+                   missing_pct=100.0 * n_missing / max(n_total, 1))
 
 
 def horizon_for_site(site: Site, height: float = 2.0, n_az: int = 1440,
@@ -380,7 +429,7 @@ def plot_skyline(h: Horizon, path: Path, title: str, sun=None, earth=None) -> No
     lo = min(h.elev.min(), -2.0)
     tracks = [t for t in (sun, earth) if t is not None]
     hi = max([h.elev.max()] + [float(np.percentile(t.alt, 99.5)) for t in tracks] + [3.0])
-    lo = min([lo] + [float(np.percentile(t.alt, 0.5)) for t in tracks])
+    lo -= 1.0  # below the terrain the fill hides the tracks anyway
 
     ax.fill_between(h.az, lo - 1, h.elev, color="#2b2f3a", lw=0, zorder=2)
     ax.plot(h.az, h.elev, color="#c9ccd6", lw=0.8, zorder=3)

@@ -60,7 +60,7 @@ def slope_layer(site: Site, stack: DemStack) -> Raster:
 
 
 def best_layer(stack: DemStack) -> Raster:
-    for name in ("sfs", "lola5", "r20"):
+    for name in ("sfs", "lola5", "r20", "r30", "r40", "r120"):
         if name in stack.layers:
             return stack.layers[name]
     raise ValueError("no terrain nearby")
