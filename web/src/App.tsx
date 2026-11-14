@@ -1,4 +1,4 @@
-import { lazy, Suspense, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
 import { Boot, Header, MobileNav, TimeBar, type Tab } from "./components/Chrome";
 import { ComparePage, type CompareRow } from "./components/ComparePage";
@@ -6,15 +6,20 @@ import { Head, Panel } from "./components/hud";
 import { MethodPage } from "./components/MethodPage";
 import { MissionsPage } from "./components/MissionsPage";
 import { PowerCard } from "./components/PowerCard";
-import { PolarMap, type OverlayKey } from "./components/PolarMap";
+import { PolarMap, type MapRoute, type OverlayKey, type RouteAction } from "./components/PolarMap";
 import { ResultPanel } from "./components/ResultPanel";
 import { SiteCard, type ListRow } from "./components/SiteCard";
+import { passState, TraverseCard, type TraverseState } from "./components/TraverseCard";
 import type { PointHorizon } from "./lib/anypoint";
 import { analyze, computeSeries, computeTrack, latLonToXY, xyToLatLon, type Analysis, type Horizon, type Observer } from "./lib/astro";
 import { loadAppData, loadClones, type AppData, type LoadStep, type Mission, type SiteInfo } from "./lib/data";
 import { batteryNeeded, generation, POWER_PRESETS, simulate, type PowerConfig } from "./lib/power";
 import { terrainSpread } from "./lib/spread";
-import { autoStepMs, DAY_MS, fmtLat, fmtLon } from "./lib/format";
+import { autoStepMs, DAY_MS, fmtLat, fmtLon, HOUR_MS } from "./lib/format";
+import {
+  departureScan, routeExposure, routeHorizons, routeLength, routeSlopes, sampleRoute, simulateTraverse,
+  type Departure, type RouteHorizons, type TraverseConfig, type XY,
+} from "./lib/traverse";
 import { T } from "./lib/theme";
 
 type Vec3 = [number, number, number];
@@ -37,6 +42,32 @@ function savedPower(): PowerConfig {
   } catch { /* private mode etc.: use the default craft */ }
   return POWER_PRESETS[0].cfg;
 }
+
+// example route: Shackleton rim -> Connecting Ridge, ~12 km. Vertices: the shortest path over 80 m LOLA terrain
+// avoiding lowlands (shadow) and slopes over 12°, simplified to 7 points. Hypothetical: no published
+// rover traverses exist here. Start 8 January 2027, one of the days the rover arrives and lasts the month.
+const EXAMPLE_ROUTE: XY[] = [
+  [-89.7823, 204.6236], [-89.7105, 199.9831], [-89.6677, 203.3852], [-89.6421, 208.9264],
+  [-89.5724, 213.9965], [-89.5153, 221.5526], [-89.4399, 222.6141],
+].map(([la, lo]) => latLonToXY(la, lo));
+const EXAMPLE_START = Date.UTC(2027, 0, 8);
+
+interface RouteDraft {
+  way: XY[];
+  drawing: boolean;
+  prev: XY[] | null; // route before editing, for Cancel
+  example: boolean;
+}
+
+interface Trace {
+  way: XY[]; // which route this is for
+  done: number;
+  total: number;
+  rh: RouteHorizons | null;
+  outside: boolean;
+}
+
+const sampleKey = (rh: RouteHorizons) => `${rh.pts.length}:${rh.pts[0].x.toFixed(0)}:${rh.pts.at(-1)!.x.toFixed(0)}:${rh.pts.at(-1)!.d.toFixed(0)}`;
 
 const siteObserver = (s: SiteInfo): Observer => ({ lat: s.lat, lon: s.lon, elevM: s.ground_z + s.horizon_height_m });
 
@@ -85,6 +116,12 @@ export default function App() {
   const [missionId, setMissionId] = useState("im-1");
   // where to turn the globe (mission view); key so a repeat click works too
   const [globeFocus, setGlobeFocus] = useState<{ lat: number; lon: number; key: number } | null>(null);
+  const [route, setRoute] = useState<RouteDraft | null>(null);
+  const [routeFit, setRouteFit] = useState(0);
+  const [trace, setTrace] = useState<Trace | null>(null);
+  const traceRef = useRef(trace);
+  traceRef.current = trace;
+  const [travCfg, setTravCfg] = useState<TraverseConfig>({ speedMh: 250, mode: "battery" });
 
   useEffect(() => {
     try { localStorage.setItem(POWER_KEY, JSON.stringify(power)); } catch { /* not critical */ }
@@ -104,9 +141,61 @@ export default function App() {
 
   const selected = data?.sites.find((s) => s.id === selectedId) ?? null;
 
+  // --- route: horizon at every path point (~50 ms each), then the rover moving in time
+  const routeWay = route && !route.drawing && route.way.length >= 2 ? route.way : null;
+  useEffect(() => {
+    const ap = data?.anyPoint;
+    if (!ap || !routeWay) return;
+    const t = traceRef.current;
+    if (t?.way === routeWay && (t.rh || t.outside)) return; // already computed (e.g. Cancel after Edit)
+    if (routeWay.some(([x, y]) => xyToLatLon(x, y)[0] > -60)) {
+      setTrace({ way: routeWay, done: 0, total: 0, rh: null, outside: true });
+      return;
+    }
+    const pts = sampleRoute(routeWay);
+    let alive = true;
+    setTrace({ way: routeWay, done: 0, total: pts.length, rh: null, outside: false });
+    routeHorizons(ap, pts, (done) => alive && setTrace((c) => (c?.way === routeWay ? { ...c, done } : c)), () => alive)
+      .then((rh) => alive && setTrace({ way: routeWay, done: pts.length, total: pts.length, rh, outside: !rh }))
+      .catch(() => alive && setTrace({ way: routeWay, done: 0, total: 0, rh: null, outside: true }));
+    return () => { alive = false; };
+  }, [data, routeWay]);
+
+  const travCfgLazy = useDeferredValue(travCfg);
+  const powerTrav = useDeferredValue(power);
+  const rh = routeWay && trace?.way === routeWay ? trace.rh : null;
+  const trav = useMemo(() => {
+    if (!data || !rh) return null;
+    const end = Math.min(start + days * DAY_MS, data.ephem.end);
+    const r = simulateTraverse(data.ephem, rh, travCfgLazy, powerTrav, start, end, Math.min(autoStepMs(days), HOUR_MS));
+    return { rh, run: r, analysis: analyze(r.series), slopes: routeSlopes(rh) };
+  }, [data, rh, travCfgLazy, powerTrav, start, days]);
+  // where along the route there is light over the whole period, for the strip under the profile
+  const exposure = useMemo(() => {
+    if (!data || !rh) return null;
+    const end = Math.min(start + days * DAY_MS, data.ephem.end);
+    return routeExposure(data.ephem, rh, start, end, Math.max(autoStepMs(days), 2 * HOUR_MS));
+  }, [data, rh, start, days]);
+  // start windows: every day of the period's year (~0.3 s), in the background so the UI stays responsive
+  const [departures, setDepartures] = useState<{ key: string; days: { t: number; v: Departure }[] } | null>(null);
+  const depYear = new Date(start).getUTCFullYear();
+  const depWindow = Math.min(days, 60);
+  const depKey = rh ? `${sampleKey(rh)}|${depYear}|${depWindow}|${JSON.stringify(travCfgLazy)}|${JSON.stringify(powerTrav)}` : "";
+  useEffect(() => {
+    if (!data || !rh) return;
+    const id = setTimeout(() => {
+      const from = Math.max(Date.UTC(depYear, 0, 1), data.ephem.start);
+      const to = Date.UTC(depYear, 11, 31);
+      setDepartures({ key: depKey, days: departureScan(data.ephem, rh, travCfgLazy, powerTrav, from, to, depWindow) });
+    }, 120);
+    return () => clearTimeout(id);
+  }, [depKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // --- what the panels show: a catalog site or any point
   const view = useMemo(() => {
     if (!data) return null;
+    // the rover's horizon depends on the cursor, so it is taken separately to keep the energy balance
+    if (trav) return { what: "route" as const, horizon: null, analysis: trav.analysis };
     if (picked?.status === "ok" && picked.point) {
       const p = picked.point;
       return {
@@ -116,9 +205,9 @@ export default function App() {
     }
     if (!selected) return null;
     return { what: "site" as const, horizon: data.horizons.get(selected.id)!, analysis: byId.get(selected.id)! };
-  }, [data, picked, selected, byId, start, days]);
+  }, [data, trav, picked, selected, byId, start, days]);
 
-  useEffect(() => setCursor(0), [selectedId, picked, start, days]);
+  useEffect(() => setCursor(0), [selectedId, picked, start, days, trav]);
 
   // --- horizon variants from terrain error: only for sites NASA provides clones for
   useEffect(() => {
@@ -133,10 +222,12 @@ export default function App() {
   // --- energy balance for what the panels show
   const powerRes = useMemo(() => {
     if (!view) return null;
+    // on a route the energy balance runs with the motion (operating load while driving)
+    if (view.what === "route" && trav) return { result: trav.run.power, needWh: trav.run.needWh };
     const s = view.analysis.series;
     const gen = generation(s, power.panelW);
     return { result: simulate(s, power, gen), needWh: batteryNeeded(s, power, gen) };
-  }, [view, power]);
+  }, [view, power, trav]);
 
   // battery needed at each site, for the COMPARE column
   const batteryById = useMemo(() => Object.fromEntries(rows.map((r) => [r.site.id, batteryNeeded(r.analysis.series, powerLazyAll)])),
@@ -180,10 +271,18 @@ export default function App() {
     return { sun: unit(data.ephem.position(0, t)), earth: unit(data.ephem.position(1, t)) };
   }, [data, clock, start]);
 
+  // map path: waypoints and how the rover drove each leg
+  const mapRouteBase = useMemo((): MapRoute | null => {
+    if (!route) return null;
+    const path = trav ? passState(trav.rh, trav.run).map((state, k) => ({ x: trav.rh.pts[k].x, y: trav.rh.pts[k].y, state })) : undefined;
+    return { way: route.way, drawing: route.drawing, lengthKm: routeLength(route.way) / 1000, path };
+  }, [route, trav]);
+
   // --- actions
   const openSite = (id: string) => {
     setSelectedId(id);
     setPicked(null);
+    setRoute(null);
     setTab("explore");
     setStage("map");
   };
@@ -194,6 +293,7 @@ export default function App() {
     setTab("explore");
     setStage("map");
     setPlaying(false);
+    setRoute(null);
     if (lat > -60 || !data.anyPoint) {
       setPicked({ ...base, status: "outside" });
       return;
@@ -219,6 +319,41 @@ export default function App() {
     if (m.site) openSite(m.site);
     else if (m.where.x !== undefined && m.where.y !== undefined) pickXY(m.where.x, m.where.y);
   };
+  // route: a whole year is too long for a rover, show ~six weeks
+  const fitPeriod = () => { if (days > 90) setDays(30); };
+  const startRoute = (way: XY[] = [], example = false) => {
+    if (example) {
+      setRouteFit(Date.now());
+      setStart(EXAMPLE_START);
+      setDays(30);
+    }
+    setPicked(null);
+    setPlaying(false);
+    setTab("explore");
+    setStage("map");
+    // default craft is a lander; routes use the rover unless the user changed the settings
+    if (JSON.stringify(power) === JSON.stringify(POWER_PRESETS[0].cfg)) setPower(POWER_PRESETS.find((p) => p.id === "rover")!.cfg);
+    setRoute({ way, drawing: way.length < 2, prev: null, example });
+    if (way.length >= 2 && !example) fitPeriod();
+  };
+  const onRoute = (a: RouteAction) => {
+    setPlaying(false);
+    if (a.kind === "tool") {
+      if (route) setRoute(null);
+      else startRoute();
+    } else if (a.kind === "add") {
+      setRoute((r) => r && { ...r, way: [...r.way, [a.x, a.y]] });
+    } else if (a.kind === "undo") {
+      setRoute((r) => r && { ...r, way: r.way.slice(0, -1) });
+    } else if (a.kind === "cancel") {
+      setRoute((r) => r && (r.prev ? { ...r, way: r.prev, drawing: false, prev: null } : null));
+    } else if (route && route.way.length >= 2) {
+      // the example stays an example only while unchanged
+      const same = !!route.prev && route.prev.length === route.way.length && route.prev.every((p, i) => p === route.way[i]);
+      setRoute({ ...route, way: same ? route.prev! : route.way, drawing: false, prev: null, example: route.example && same });
+      fitPeriod();
+    }
+  };
   const showMissionOnGlobe = (m: Mission) => {
     if (m.where.lat === undefined || m.where.lon === undefined) return;
     setGlobeFocus({ lat: m.where.lat, lon: m.where.lon, key: Date.now() });
@@ -234,12 +369,30 @@ export default function App() {
 
   const powerCard = powerRes && (
     <PowerCard cfg={power} onCfg={setPower} result={powerRes.result} needWh={powerRes.needWh}
-               spread={spread} spreadLoading={!!cloneFor && !spread} />
+               spread={spread} spreadLoading={!!cloneFor && !spread}
+               note={view?.what === "route" ? "Vertical panel turning to face the Sun. While driving the rover draws the operating load, "
+                 + "in shadow from the battery; parked, it drops to survival mode unless the panel covers the operating load. "
+                 + "Battery starts full, charges at 90%." : undefined} />
   );
 
   // --- left panel
   let left = null;
-  if (view && m) {
+  const travState: TraverseState | null = !route ? null
+    : route.drawing ? { status: "drawing" }
+    : trav ? { status: "ok", rh: trav.rh, run: trav.run, metrics: trav.analysis.metrics, exposure, slopes: trav.slopes, cursor }
+    : trace?.way === route.way && trace.outside ? { status: "outside" }
+    : { status: "tracing", done: trace?.way === route.way ? trace.done : 0, total: trace?.way === route.way ? trace.total : 0 };
+  if (route && travState) {
+    left = (
+      <TraverseCard state={travState} example={route.example} waypoints={route.way.length} lengthM={routeLength(route.way)}
+                    startLatLon={route.way.length ? xyToLatLon(route.way[0][0], route.way[0][1]) : null}
+                    cfg={travCfg} onCfg={setTravCfg} periodDays={days} periodStart={start} power={trav ? powerCard : null}
+                    onEdit={() => setRoute({ ...route, drawing: true, prev: route.way })} onClear={() => setRoute(null)}
+                    onExample={() => startRoute(EXAMPLE_ROUTE, true)}
+                    onCursor={(i) => { setPlaying(false); setCursor(i); }}
+                    departures={departures?.key === depKey ? departures.days : null} onStart={(t) => { setPlaying(false); setStart(t); }} />
+    );
+  } else if (view && m) {
     if (view.what === "point" && picked?.point) {
       const p = picked.point;
       const list: ListRow[] = nearest.slice(0, 4).map(({ s, d }) => ({
@@ -301,6 +454,11 @@ export default function App() {
   );
 
   const mSel = selected && byId.get(selected.id)?.metrics;
+  const iNow = Math.min(cursor, Math.max(0, n - 1));
+  const roverPt = trav ? trav.rh.pts[trav.run.idx[iNow]] : null;
+  const horizonNow = view ? view.horizon ?? (trav ? trav.rh.horizons[trav.run.idx[iNow]] : null) : null;
+  const mapRoute = route && mapRouteBase ? { ...mapRouteBase, fitKey: routeFit, rover: roverPt && { x: roverPt.x, y: roverPt.y } } : null;
+  const hideSel = !!picked || !!route;
   return (
     <div className="app">
       <Header tab={tab} onTab={setTab} clock={clock} />
@@ -311,27 +469,27 @@ export default function App() {
         <div className="stage">
           <div className="stage-layer" hidden={stage !== "globe"}>
             <Suspense fallback={null}>
-              <Globe data={data} selectedId={picked ? null : selectedId} sunPctById={sunPctById}
+              <Globe data={data} selectedId={hideSel ? null : selectedId} sunPctById={sunPctById}
                      sunDir={dirs.sun} earthDir={dirs.earth} onPick={pickLatLon} onZoomPole={() => setStage("map")}
                 missions={missionsList} missionId={missionId} focus={globeFocus} />
             </Suspense>
           </div>
           {mapSeen && (
             <div className="stage-layer" hidden={stage !== "map"}>
-              <PolarMap data={data} selectedId={picked ? null : selectedId} sunPctById={sunPctById}
+              <PolarMap data={data} selectedId={hideSel ? null : selectedId} sunPctById={sunPctById}
                         selectedTag={selected && mSel ? { title: selected.name.toUpperCase(),
                           line: `${mSel.sunMeanPct.toFixed(0)}% sun · ${mSel.earthPct.toFixed(0)}% Earth` } : null}
                         overlays={overlays} onToggleOverlay={(k) => setOverlays((o) => ({ ...o, [k]: !o[k] }))}
-                        onSelect={openSite} onPick={pickXY} onGlobe={() => setStage("globe")}
+                        onSelect={openSite} onPick={(x, y) => { if (!route) pickXY(x, y); }} onGlobe={() => setStage("globe")}
                         picked={picked && { x: picked.x, y: picked.y }}
                         pickedTag={picked ? { title: "SELECTED POINT", line: `${fmtLat(picked.lat)} ${fmtLon(picked.lon)}` } : null}
                         pickedLink={picked?.status === "ok" && nearest[0] ? { x: nearest[0].s.x, y: nearest[0].s.y } : null}
-                        missions={missionsList} />
+                        missions={missionsList} route={mapRoute} onRoute={onRoute} />
             </div>
           )}
           {card}
         </div>
-        {view && <ResultPanel what={view.what} horizon={view.horizon} analysis={view.analysis} cursor={cursor}
+        {view && horizonNow && <ResultPanel what={view.what} horizon={horizonNow} analysis={view.analysis} cursor={cursor}
                               onCursor={(i) => { setPlaying(false); setCursor(i); }} />}
         {tab === "explore" && timebar}
       </main>

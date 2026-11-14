@@ -16,7 +16,7 @@ const TABS: [WinKey, string, string, string][] = [
 ];
 
 interface Props {
-  what: "site" | "point";
+  what: "site" | "point" | "route";
   horizon: Horizon;
   analysis: Analysis;
   cursor: number;
@@ -40,7 +40,7 @@ export function ResultPanel({ what, horizon, analysis, cursor, onCursor }: Props
   return (
     <Panel className="right">
       <Head num="03" label="RESULT" right={`for this ${what} and period`} />
-      <div className="sub-title">Horizon from the {what}</div>
+      <div className="sub-title">{what === "route" ? "Horizon where the rover is now" : `Horizon from the ${what}`}</div>
       <div className="sub-note">
         {wall > 6 ? `terrain rises to ${wall.toFixed(0)}° and hides the Sun much of the time`
                   : "terrain to 300 km · amber: Sun’s path, blue: Earth"}

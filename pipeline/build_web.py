@@ -8,7 +8,7 @@ this holds only what needs 80 GB of terrain and SPICE:
     sites.json               site catalog
     horizons/<id>.bin        site horizon: 1440 x int16, hundredths of a degree
     tiles/base/{z}/{x}/{y}   base map to 60°S, z0-5 (hillshade 240/120 m)
-    tiles/detail/{z}/{x}/{y} detail to 80°S, z6-7 (hillshade 40 m)
+    tiles/detail/{z}/{x}/{y} detail: z6 to 60° (120 m, 40 m near the pole), z7 to 75° (40/30 m)
     overlays/*.png           mean illumination and Earth visibility (Mazarico),
                              permanent shadow (Barker)
     closeups/<id>.jpg        10 x 10 km around a site: LROC NAC (SfS) or hillshade
@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -53,9 +54,10 @@ DERIVED = ROOT / "data" / "derived"
 # Map world: a ±W metre square in polar stereographic projection (to 60°S)
 W = 2.0 * R_MOON_M * np.tan(np.radians(30.0) / 2.0)  # 931 km
 DETAIL_HALF = 304_000.0  # extent of the 20/40 m maps (80°S)
+FINE_HALF = 2.0 * R_MOON_M * np.tan(np.radians(15.0) / 2.0)  # 457 km: extent of the 30 m map (75°S)
 TILE = 256
 BASE_MAX_Z = 5
-DETAIL_ZOOMS = (6, 7)
+DETAIL_ZOOMS = (6, 7)  # z6: whole map to 60°; z7: square to 75° (30 and 40 m there)
 
 EPHEM_START = "2023-07-01T00:00:00"
 EPHEM_END = "2036-01-01T00:00:00"
@@ -176,47 +178,61 @@ def tile_bounds(z: int, tx: int, ty: int) -> tuple[float, float, float, float]:
     return left, top - size, left + size, top
 
 
-def render_tile(ds, bounds, out_path: Path) -> bool:
+def render_tile(sources, bounds, out_path: Path) -> bool:
+    """Tile from several hillshades: the first is the most detailed, holes and edges come from the next."""
     left, bottom, right, top = bounds
-    b = ds.bounds
-    if right <= b.left or left >= b.right or top <= b.bottom or bottom >= b.top:
-        return False
-    win = from_bounds(left, bottom, right, top, ds.transform)
-    a = ds.read(1, window=win, out_shape=(TILE, TILE), boundless=True, fill_value=0,
-                resampling=Resampling.average)
-    if not a.any():
+    out = None
+    for ds in sources:
+        b = ds.bounds
+        if right <= b.left or left >= b.right or top <= b.bottom or bottom >= b.top:
+            continue
+        win = from_bounds(left, bottom, right, top, ds.transform)
+        a = ds.read(1, window=win, out_shape=(TILE, TILE), boundless=True, fill_value=0,
+                    resampling=Resampling.average)
+        out = a if out is None else np.where(out > 0, out, a)
+        if out.all():
+            break
+    if out is None or not out.any():
         return False
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    Image.fromarray(a.astype(np.uint8)).save(out_path, quality=82, optimize=True)
+    Image.fromarray(out.astype(np.uint8)).save(out_path, quality=82, optimize=True)
     return True
 
 
 def build_tiles() -> None:
+    # all hillshades from one algorithm (hillshade()) so the look doesn't change between levels
     hill240 = derived_hillshade(DEM_REGIONAL / "LDEM_60S_240MPP_ADJ.TIF", "hill_60S_240m.tif")
     hill120 = derived_hillshade(DEM_REGIONAL / "LDEM_60S_120MPP_ADJ.TIF", "hill_60S_120m.tif")
-    hill40 = DEM_REGIONAL / "LDEM_80S_40MPP_ADJ_HILL.TIF"
+    hill40 = derived_hillshade(DEM_REGIONAL / "LDEM_80S_40MPP_ADJ.TIF", "hill_80S_40m.tif")
+    hill30 = derived_hillshade(DEM_REGIONAL / "LDEM_75S_30MPP_ADJ.TIF", "hill_75S_30m.tif")
 
     n = 0
     for z in range(BASE_MAX_Z + 1):
-        src = hill240 if z <= 3 else hill120
-        with rasterio.open(src) as ds:
+        with rasterio.open(hill240 if z <= 3 else hill120) as ds:
             for tx in range(2**z):
                 for ty in range(2**z):
-                    n += render_tile(ds, tile_bounds(z, tx, ty),
+                    n += render_tile([ds], tile_bounds(z, tx, ty),
                                      WEB_DATA / "tiles" / "base" / str(z) / str(tx) / f"{ty}.jpg")
     log(f"tiles base z0-{BASE_MAX_Z}: {n}")
 
-    n = 0
-    with rasterio.open(hill40) as ds:
+    shutil.rmtree(WEB_DATA / "tiles" / "detail", ignore_errors=True)
+    with rasterio.open(hill40) as h40, rasterio.open(hill30) as h30, rasterio.open(hill120) as h120:
+        plan = {6: ([h40, h120], W), 7: ([h40, h30, h120], FINE_HALF)}
         for z in DETAIL_ZOOMS:
+            sources, half = plan[z]
             size = 2 * W / 2**z
-            lo = int(np.floor((W - DETAIL_HALF) / size))
-            hi = int(np.ceil((W + DETAIL_HALF) / size))
+            lo = int(np.floor((W - half) / size))
+            hi = int(np.ceil((W + half) / size))
+            n = 0
             for tx in range(lo, hi):
                 for ty in range(lo, hi):
-                    n += render_tile(ds, tile_bounds(z, tx, ty),
+                    bl, bb, br, bt = tile_bounds(z, tx, ty)
+                    # tile point nearest the pole: tiles entirely beyond 60° are skipped
+                    if np.hypot(min(max(0.0, bl), br), min(max(0.0, bb), bt)) > W:
+                        continue
+                    n += render_tile(sources, (bl, bb, br, bt),
                                      WEB_DATA / "tiles" / "detail" / str(z) / str(tx) / f"{ty}.jpg")
-    log(f"tiles detail z{DETAIL_ZOOMS[0]}-{DETAIL_ZOOMS[-1]}: {n}")
+            log(f"tiles detail z{z} (to {half / 1000:.0f} km): {n}")
 
 
 # --------------------------------------------------------------------------- #
@@ -250,24 +266,76 @@ def read_scaled(path: Path, out_px: int) -> tuple[np.ndarray, tuple[float, float
         return a, tuple(ds.bounds)
 
 
+def rho_lat(lat: float) -> float:
+    """Map distance from the pole (m) for a latitude in degrees."""
+    return float(2 * R_MOON_M * np.tan(np.radians(90 + lat) / 2))
+
+
+def _rho_grid(bounds, shape) -> np.ndarray:
+    left, bottom, right, top = bounds
+    h, w = shape
+    xs = left + (np.arange(w) + 0.5) * (right - left) / w
+    ys = top - (np.arange(h) + 0.5) * (top - bottom) / h
+    return np.hypot(xs[None, :], ys[:, None])
+
+
+def _ring_mask(rgba: np.ndarray, rho: np.ndarray, r_in: float, r_out: float,
+               fade: tuple[float, float] | None = None, fade_in: bool = False) -> np.ndarray:
+    """Keeps only the ring r_in < rho <= r_out; fade is the band where opacity falls off outwards
+    (or rises, if fade_in), for the seam between a NASA map and ours."""
+    out = rgba.copy()
+    out[(rho <= r_in) | (rho > r_out)] = 0
+    if fade:
+        t = np.clip((rho - fade[0]) / (fade[1] - fade[0]), 0, 1)
+        k = t if fade_in else 1 - t
+        out[..., 3] = (out[..., 3] * k).astype(np.uint8)
+    return out
+
+
 def build_overlays() -> dict:
+    """Mean illumination, Earth visibility and permanent shadow as concentric rings so each
+    pixel comes from exactly one map (otherwise opacity stacks up and squares show):
+    85°: 60 m, 75°: 120 m, 65°: 240 m (Mazarico, NASA), 60-66°: our own (zone_map.py)."""
     odir = WEB_DATA / "overlays"
+    shutil.rmtree(odir, ignore_errors=True)
     odir.mkdir(parents=True, exist_ok=True)
+    r85, r80, r75, r66, r65 = (rho_lat(v) for v in (-85, -80, -75, -66, -65))
+    fade = (r66, r65)
+    ring_path = DERIVED / "zone_ring_2000m.npz"
     meta = {}
-    jobs = [
-        ("sun_75S", MAPS_ILLUM / "AVGVISIB_75S_120M_201608.TIF", SUN_STOPS, 2048),
-        ("sun_85S", MAPS_ILLUM / "AVGVISIB_85S_060M_201608.TIF", SUN_STOPS, 2528),
-        ("earth_75S", MAPS_ILLUM / "AVGVISIB_75S_120M_201608_EARTH.TIF", EARTH_STOPS, 2048),
-        ("earth_85S", MAPS_ILLUM / "AVGVISIB_85S_060M_201608_EARTH.TIF", EARTH_STOPS, 2528),
-        ("psr_80S", MAPS_PSR / "LPSR_80S_20MPP_ADJ.TIF", PSR_STOPS, 4096),
+    jobs = [  # name, source, palette, pixels, ring (r_in, r_out), seam
+        ("sun_85S", MAPS_ILLUM / "AVGVISIB_85S_060M_201608.TIF", SUN_STOPS, 2528, (0, r85), None),
+        ("sun_75S", MAPS_ILLUM / "AVGVISIB_75S_120M_201608.TIF", SUN_STOPS, 2048, (r85, r75), None),
+        ("sun_65S", MAPS_ILLUM / "AVGVISIB_65S_240M_201608.TIF", SUN_STOPS, 2560, (r75, r65), fade),
+        ("sun_ring", ring_path, SUN_STOPS, 0, (r66, np.inf), None),
+        ("earth_85S", MAPS_ILLUM / "AVGVISIB_85S_060M_201608_EARTH.TIF", EARTH_STOPS, 2528, (0, r85), None),
+        ("earth_75S", MAPS_ILLUM / "AVGVISIB_75S_120M_201608_EARTH.TIF", EARTH_STOPS, 2048, (r85, r75), None),
+        ("earth_65S", MAPS_ILLUM / "AVGVISIB_65S_240M_201608_EARTH.TIF", EARTH_STOPS, 2560, (r75, r65), fade),
+        ("earth_ring", ring_path, EARTH_STOPS, 0, (r66, np.inf), None),
+        ("psr_80S", MAPS_PSR / "LPSR_80S_20MPP_ADJ.TIF", PSR_STOPS, 4096, (0, r80), None),
+        ("psr_75S", MAPS_PSR / "LPSR_75S_120M_201608.TIF", PSR_STOPS, 3072, (r80, r75), None),
+        ("psr_65S", MAPS_PSR / "LPSR_65S_240M_201608.TIF", PSR_STOPS, 3072, (r75, r65), None),
     ]
-    for name, path, stops, px in jobs:
-        a, bounds = read_scaled(path, px)
-        if name.startswith("psr"):
-            a = np.where(a > 0, a, np.nan)
-        Image.fromarray(colorize(a, stops)).save(odir / f"{name}.png", optimize=True)
-        meta[name] = {"file": f"overlays/{name}.png", "bounds": bounds}
-        log(f"overlay {name}: {px}²")
+    for name, path, stops, px, (r_in, r_out), fd in jobs:
+        if path == ring_path:
+            if not path.exists():
+                log(f"overlay {name}: no {path.name}, run python -m pipeline.zone_map first")
+                continue
+            z = np.load(path)
+            a = z["sun" if name.startswith("sun") else "earth"].astype(np.float64)
+            res, x0, y0 = float(z["res"]), float(z["x0"]), float(z["y0"])
+            n = a.shape[0]
+            bounds = (x0 - res / 2, y0 - (n - 1) * res - res / 2, x0 + (n - 1) * res + res / 2, y0 + res / 2)
+            rgba = _ring_mask(colorize(a, stops), _rho_grid(bounds, a.shape), r_in, r_out, fade, fade_in=True)
+        else:
+            a, bounds = read_scaled(path, px)
+            if name.startswith("psr"):
+                a = np.where(a > 0, a, np.nan)
+            rgba = _ring_mask(colorize(a, stops), _rho_grid(bounds, a.shape), r_in, r_out, fd)
+        Image.fromarray(rgba).save(odir / f"{name}.png", optimize=True)
+        meta[name] = {"file": f"overlays/{name}.png", "bounds": bounds,
+                      "source": "ours" if path == ring_path else "nasa"}
+        log(f"overlay {name}: {rgba.shape[1]}², {(odir / f'{name}.png').stat().st_size / 1e6:.1f} MB")
     (odir / "overlays.json").write_text(json.dumps(meta, indent=1), encoding="utf-8")
     return meta
 
@@ -485,6 +553,39 @@ def build_globe() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# terrain uncertainty: horizon variants from LOLA clones (pipeline/uncertainty.py)
+# --------------------------------------------------------------------------- #
+
+
+def build_clones() -> None:
+    """horizons/clones/<id>.bin: gzip int16[n_clones * n_az], hundredths of a degree.
+
+    Variant = catalog horizon + (clone horizon - base LOLA 5 m horizon): the LOLA terrain
+    error carried over to our horizon (within 0-10 km ours is from SfS, better than LOLA,
+    so the spread is conservative, i.e. overstated)."""
+    import gzip
+
+    src = DERIVED / "clones"
+    cdir = WEB_DATA / "horizons" / "clones"
+    shutil.rmtree(cdir, ignore_errors=True)
+    cdir.mkdir(parents=True, exist_ok=True)
+    index = {}
+    for path in sorted(src.glob("*.npz")):
+        z = np.load(path)
+        var = z["catalog"][None, :] + (z["elev"] - z["lola5"][None, :])
+        cent = np.clip(np.round(var * 100), -32768, 32767).astype("<i2")
+        (cdir / f"{path.stem}.bin").write_bytes(gzip.compress(cent.tobytes(), 9))
+        index[path.stem] = {"n": int(var.shape[0]), "n_az": int(var.shape[1])}
+        d = var - z["catalog"][None, :]
+        log(f"clones {path.stem}: {var.shape[0]} variants, horizon shift σ {d.std():.3f}°, "
+            f"max {np.abs(d).max():.2f}°")
+    (cdir / "index.json").write_text(json.dumps({
+        "source": "LOLA 5 m error clones, Barker et al. 2021 (PGDA)",
+        "method": "catalog horizon + (clone horizon - base LOLA horizon)", "sites": index}, indent=1),
+        encoding="utf-8")
+
+
+# --------------------------------------------------------------------------- #
 # CLPS missions (data/missions.yaml)
 # --------------------------------------------------------------------------- #
 
@@ -529,6 +630,8 @@ STEPS = {
     "overlays": build_overlays,
     "closeups": build_closeups,
     "reference": build_reference,
+    "clones": build_clones,
+    "missions": build_missions,
 }
 
 
@@ -541,7 +644,7 @@ def main(argv: list[str] | None = None) -> int:
     kernels.load()
     WEB_DATA.mkdir(parents=True, exist_ok=True)
     (WEB_DATA / "map.json").write_text(json.dumps({
-        "world_half_m": W, "detail_half_m": DETAIL_HALF, "tile_px": TILE,
+        "world_half_m": W, "detail_half_m": DETAIL_HALF, "fine_half_m": FINE_HALF, "tile_px": TILE,
         "base_max_zoom": BASE_MAX_Z, "detail_zooms": list(DETAIL_ZOOMS),
         "projection": "+proj=stere +lat_0=-90 +lat_ts=-90 +lon_0=0 +R=1737400 +units=m",
     }, indent=1), encoding="utf-8")

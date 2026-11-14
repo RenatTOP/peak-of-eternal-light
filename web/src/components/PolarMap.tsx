@@ -41,6 +41,7 @@ export interface MapRoute {
   lengthKm: number;
   path?: { x: number; y: number; state: "lit" | "dark" | "ahead" }[]; // path points: how the rover drove them
   rover?: { x: number; y: number } | null;
+  fitKey?: number; // change -> the map fits the whole route
 }
 
 /** Leaflet in polar stereographic metres: LatLng = (y, x). */
@@ -247,6 +248,15 @@ export function PolarMap(props: Props) {
     });
     return () => { g.remove(); };
   }, [props.route?.way, props.route?.path, props.route?.drawing]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // fit the whole route (e.g. an example was opened)
+  useEffect(() => {
+    const m = map.current;
+    const r = props.route;
+    if (!m || !r?.fitKey || r.way.length < 2) return;
+    m.invalidateSize();
+    m.fitBounds(L.latLngBounds(r.way.map(([x, y]) => ll(x, y))), { padding: [60, 60], maxZoom: 8 });
+  }, [props.route?.fitKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // the rover separately, since it moves with the time cursor
   const rover = useRef<L.Marker | null>(null);

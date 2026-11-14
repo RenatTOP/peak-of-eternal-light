@@ -35,11 +35,29 @@ interface Props {
 
 const days = (h: number) => (h >= 48 ? `${(h / 24).toFixed(1)} d` : `${Math.round(h)} h`);
 
-export function SiteCard(p: Props) {
-  const m = p.metrics;
-  const periodH = p.periodDays * 24;
+/** Four key numbers: energy, link, both at once, longest night. */
+export function MetricGauges({ m, periodDays }: { m: Metrics; periodDays: number }) {
+  const periodH = periodDays * 24;
   const nightSub = m.sunAnyPct <= 0 ? "no sunlight at all" : m.nightMaxH >= periodH * 0.98 ? "whole period" : "the battery must last";
   const earthSub = m.earthPct <= 0 ? "never in view" : m.gapMaxH <= 0 ? "always in view" : `max gap ${fmtDuration(m.gapMaxH)}`;
+  return (
+    <div className="gauges">
+      <Gauge frac={m.sunMeanPct / 100} value={m.sunMeanPct.toFixed(0)} unit="%" label="Solar energy" color={T.sun}
+             sub={`flat ground ${m.flatSunMeanPct.toFixed(0)}%`}
+             title="Average share of the Sun's disc above the real terrain horizon: the share of full-Sun power a panel gets." />
+      <Gauge frac={m.earthPct / 100} value={m.earthPct.toFixed(0)} unit="%" label="Link to Earth" color={T.earth}
+             sub={earthSub} title="Share of time when at least part of Earth's disc clears the terrain: direct-to-Earth radio." />
+      <Gauge frac={m.sunEarthPct / 100} value={m.sunEarthPct.toFixed(0)} unit="%" label="Sun + Earth" color={T.both}
+             sub="power and link together" title="Share of time with sunlight and a line to Earth at once." />
+      <Gauge frac={Math.min(1, m.nightMaxH / 24 / 29.53)} value={m.nightMaxH >= 48 ? (m.nightMaxH / 24).toFixed(1) : m.nightMaxH.toFixed(0)}
+             unit={m.nightMaxH >= 48 ? "d" : "h"} label="Longest night" color={T.night} sub={nightSub}
+             title="Longest stretch with the whole solar disc hidden by terrain; the ring is scaled to one lunar day (29.5 d)." />
+    </div>
+  );
+}
+
+export function SiteCard(p: Props) {
+  const m = p.metrics;
   return (
     <Panel className="left scroll">
       <Head num="01" label={p.kind.toUpperCase() === "SELECTED POINT" ? "SELECTED POINT" : "SITE"}
@@ -48,18 +66,7 @@ export function SiteCard(p: Props) {
       <div className="coords">{p.coords}</div>
       {p.kind.toUpperCase() !== "SELECTED POINT" && <div className="kind" style={{ color: p.kindColor, marginTop: 6 }}>{p.kind.toUpperCase()}</div>}
       {p.notice && <div className="notice">{p.notice}</div>}
-      <div className="gauges">
-        <Gauge frac={m.sunMeanPct / 100} value={m.sunMeanPct.toFixed(0)} unit="%" label="Solar energy" color={T.sun}
-               sub={`flat ground ${m.flatSunMeanPct.toFixed(0)}%`}
-               title="Average share of the Sun's disc above the real terrain horizon: the share of full-Sun power a panel gets." />
-        <Gauge frac={m.earthPct / 100} value={m.earthPct.toFixed(0)} unit="%" label="Link to Earth" color={T.earth}
-               sub={earthSub} title="Share of time when at least part of Earth's disc clears the terrain: direct-to-Earth radio." />
-        <Gauge frac={m.sunEarthPct / 100} value={m.sunEarthPct.toFixed(0)} unit="%" label="Sun + Earth" color={T.both}
-               sub="power and link together" title="Share of time with sunlight and a line to Earth at once." />
-        <Gauge frac={Math.min(1, m.nightMaxH / 24 / 29.53)} value={m.nightMaxH >= 48 ? (m.nightMaxH / 24).toFixed(1) : m.nightMaxH.toFixed(0)}
-               unit={m.nightMaxH >= 48 ? "d" : "h"} label="Longest night" color={T.night} sub={nightSub}
-               title="Longest stretch with the whole solar disc hidden by terrain; the ring is scaled to one lunar day (29.5 d)." />
-      </div>
+      <MetricGauges m={m} periodDays={p.periodDays} />
       {p.spread && (
         <div className="spread" title="5–95% range over 100 versions of the terrain, each within NASA’s error estimate for the LOLA 5 m model (Barker et al. 2021).">
           <span className="spread-k">TERRAIN ±</span>

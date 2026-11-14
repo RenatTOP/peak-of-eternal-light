@@ -24,6 +24,11 @@ export function MethodPage() {
             <li><b>Terrain uncertainty</b>: for eight candidate sites NASA publishes 100 versions of the 5 m terrain,
               each within the error estimate of the LOLA model. We rerun every result on all 100 and show the
               5–95% range, plus how many versions the craft survives.</li>
+            <li><b>Rover traverse</b>: draw a route on the map. Every ~100–150 m along it the horizon is traced like a
+              click anywhere, and the rover moves at a set speed while the Sun and Earth are placed in the sky of the spot
+              where it is at each moment. Driving draws the operating load, in shadow from the battery; at 30% charge the
+              rover parks to recharge and moves on at 80%, or, if it is steered from Earth, it also waits for Earth to rise.
+              A year of departure dates shows when the traverse gets through and when the battery empties on the way.</li>
           </ul>
           <p>
             Catalog sites use horizons precomputed from 5 m terrain. For any other point south of 60°S the near

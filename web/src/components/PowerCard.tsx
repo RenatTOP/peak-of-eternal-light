@@ -13,6 +13,7 @@ interface Props {
   needWh: number;
   spread: Spread | null;
   spreadLoading: boolean;
+  note?: string; // model explanation, if different (rover route)
 }
 
 export function fmtWh(wh: number): string {
@@ -35,7 +36,7 @@ function Field({ label, unit, value, step, onChange }: {
   );
 }
 
-export function PowerCard({ cfg, onCfg, result: r, needWh, spread, spreadLoading }: Props) {
+export function PowerCard({ cfg, onCfg, result: r, needWh, spread, spreadLoading, note }: Props) {
   const preset = POWER_PRESETS.find((p) => JSON.stringify(p.cfg) === JSON.stringify(cfg))?.id ?? "custom";
   const short = r.genMeanW < r.loadMeanW;
   return (
@@ -88,8 +89,8 @@ export function PowerCard({ cfg, onCfg, result: r, needWh, spread, spreadLoading
         )}
       </div>
       <p className="pw-note">
-        Vertical panel turning to face the Sun. The craft operates while the panel covers the operating
-        load, otherwise it drops to survival mode on the battery. Battery starts full, charges at 90%.
+        {note ?? <>Vertical panel turning to face the Sun. The craft operates while the panel covers the operating
+        load, otherwise it drops to survival mode on the battery. Battery starts full, charges at 90%.</>}
       </p>
     </div>
   );
