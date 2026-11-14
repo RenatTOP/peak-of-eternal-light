@@ -81,11 +81,9 @@ class BandDem:
         self.meta = {"levels": {"n120": {"res": self.res}}}
 
     def height(self, levels, x, y) -> np.ndarray:
-        x = np.asarray(x, np.float64)
-        y = np.asarray(y, np.float64)
-        c = (x - self.left) / self.res - 0.5
-        r = (self.top - y) / self.res - 0.5
-        j, i = np.floor(c).astype(np.int64), np.floor(r).astype(np.int64)
+        c = (np.asarray(x) - self.left) / self.res - 0.5
+        r = (self.top - np.asarray(y)) / self.res - 0.5
+        j, i = np.floor(c).astype(np.int32), np.floor(r).astype(np.int32)
         fx, fy = c - j, r - i
         h, w = self.z.shape
         ok = (j >= 0) & (i >= 0) & (j < w - 1) & (i < h - 1)
@@ -96,9 +94,69 @@ class BandDem:
         return np.where(ok, v, np.nan)
 
 
+@numba.njit(cache=True, fastmath=False)
+def _near_kernel(z, left, top, res, x, y, eye, d, n_az, R):
+    """Near horizon of one point: rays over the map as in gc.near_horizon, but the angle is
+    atan(dz / s - s / 2R), s the surface distance (map distance / projection scale,
+    on a sphere of radius R + eye height). Against gc.near_horizon: median 0.004°, max 0.02°."""
+    out = np.empty(n_az)
+    h, w = z.shape
+    lon0 = np.arctan2(x, y)
+    n2x, n2y = np.sin(lon0), np.cos(lon0)
+    e2x, e2y = np.cos(lon0), -np.sin(lon0)
+    m0 = 1.0 + (x * x + y * y) / (4.0 * R * R)
+    kh = 1.0 + eye / R
+    for a in range(n_az):
+        az = a * 2.0 * np.pi / n_az
+        dx = np.cos(az) * n2x + np.sin(az) * e2x
+        dy = np.cos(az) * n2y + np.sin(az) * e2y
+        best = -np.inf
+        for k in range(d.shape[0]):
+            X = x + dx * d[k]
+            Y = y + dy * d[k]
+            c = (X - left) / res - 0.5
+            r = (top - Y) / res - 0.5
+            j = int(np.floor(c))
+            i = int(np.floor(r))
+            if j < 0 or i < 0 or j >= w - 1 or i >= h - 1:
+                continue
+            fx = c - j
+            fy = r - i
+            zz = (z[i, j] * (1 - fx) * (1 - fy) + z[i, j + 1] * fx * (1 - fy)
+                  + z[i + 1, j] * (1 - fx) * fy + z[i + 1, j + 1] * fx * fy)
+            if not np.isfinite(zz):
+                continue
+            m1 = 1.0 + (X * X + Y * Y) / (4.0 * R * R)
+            s = d[k] / ((m0 + m1) / 2.0)
+            t = (zz - eye) / (s * kh) - s / (2.0 * R)
+            if t > best:
+                best = t
+        out[a] = np.degrees(np.arctan(best)) if np.isfinite(best) else -90.0
+    return out
+
+
+def fast_near(dem: BandDem, x: float, y: float, eye: float, radius: float, n_az: int = gc.N_AZ) -> np.ndarray:
+    d = gc.near_distances(dem.res, radius)
+    return _near_kernel(dem.z, dem.left, dem.top, dem.res, float(x), float(y), float(eye), d, n_az, R_MOON_M)
+
+
+def horizon(dem: BandDem, x: float, y: float) -> tuple[np.ndarray, float]:
+    """Horizon by the browser scheme (near + far from the grid), outer zone."""
+    ground = float(dem.height(None, np.array([x]), np.array([y]))[0])
+    eye = ground + gc.grid_mod.HEIGHT_M
+    near = fast_near(dem, x, y, eye, gc.NEAR["outer"]["radius_m"])
+    far = gc.far_at(ZONES["outer"], x, y, eye)
+    if far is None:
+        return near, ground
+    fe = far[0]
+    pos = np.arange(gc.N_AZ) * len(fe) / gc.N_AZ
+    i = np.floor(pos).astype(int)
+    f = fe[i % len(fe)] * (1 - (pos - i)) + fe[(i + 1) % len(fe)] * (pos - i)
+    return np.maximum(near, f), ground
+
+
 def point(x: float, y: float, dem) -> tuple[float, float]:
-    elev, ground, zname = gc.browser_horizon(dem, x, y)
-    assert zname == "outer"
+    elev, ground = horizon(dem, x, y)
     if not np.isfinite(ground):
         return np.nan, np.nan
     obs = np.array(gc.xyz_from_map(x, y, ground + 2.0)) / 1000.0  # km, MOON_ME
