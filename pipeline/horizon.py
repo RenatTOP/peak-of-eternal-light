@@ -28,7 +28,7 @@ import argparse
 import json
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
@@ -422,6 +422,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--n-az", type=int, default=1440, help="number of azimuths")
     p.add_argument("--refresh", action="store_true", help="recompute, ignoring the cache")
     p.add_argument("--plot", type=Path, help="PNG path (single site)")
+    p.add_argument("--tracks", type=int, metavar="YEAR",
+                   help="overlay this year's Sun and Earth tracks")
     args = p.parse_args(argv)
 
     sites = load_sites()
@@ -443,7 +445,21 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  terrain beyond 60 km sets the horizon at {100 * far.mean():.0f}% of azimuths"
               f"   ({h.compute_s:.1f} s)")
         if args.plot and len(chosen) == 1:
-            plot_skyline(h, args.plot, f"{site.label}: horizon, +{h.height:g} m")
+            sun = earth = None
+            if args.tracks:
+                import spiceypy as spice
+
+                from . import kernels
+                from .ephem import observe
+
+                kernels.load()
+                et0 = spice.str2et(f"{args.tracks}-01-01")
+                ets = np.arange(et0, et0 + 365.25 * 86400, 3 * 3600.0)
+                observer = replace(site, elev=h.ground_z + h.height)
+                sun, earth = observe(observer, ets, "SUN"), observe(observer, ets, "EARTH")
+            suffix = f", {args.tracks} tracks" if args.tracks else ""
+            plot_skyline(h, args.plot, f"{site.label}: horizon, +{h.height:g} m{suffix}",
+                         sun=sun, earth=earth)
             print(f"  plot -> {args.plot}")
     return 0
 

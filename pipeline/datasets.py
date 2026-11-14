@@ -55,7 +55,7 @@ class SiteTile:
     name: str
     site_id: str  # id in data/sites.yaml
     mb_per_file: float
-    lit: bool = True  # False: permanently shadowed crater, no clones needed
+    lit: bool = True  # False: tile by a permanently shadowed crater, not a landing candidate, no clones
     has_rois: bool = False  # region-outline archive exists only for some tiles
     note: str = ""
 
