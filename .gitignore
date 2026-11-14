@@ -1,16 +1,17 @@
-# SPICE kernels: downloaded by script, kept out of the repo
-data/kernels/*
-!data/kernels/.gitkeep
-
-# DEMs: gigabytes
-data/dem/*
-!data/dem/.gitkeep
+# Data is downloaded by: python -m pipeline.fetch_data
+# Only the site catalog and the download log stay in git.
+data/*
+!data/sites.yaml
+!data/manifest.json
+*.part
 
 # computed results
 out/
-*.csv
-*.png
-!team-*.jpg
+
+# web: dependencies, build and generated data (python -m pipeline.build_web / pipeline.grid)
+web/node_modules/
+web/dist/
+web/public/data/
 
 # python
 .venv/
@@ -19,6 +20,7 @@ __pycache__/
 .pytest_cache/
 .ipynb_checkpoints/
 
-# ide
+# ide / os
 .vscode/
 .idea/
+Thumbs.db

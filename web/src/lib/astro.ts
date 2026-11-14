@@ -21,7 +21,12 @@ export class Ephem {
   readonly sunRadius: number;
   readonly earthRadius: number;
 
-  constructor(readonly meta: EphemMeta, private readonly data: Float32Array) {
+  readonly meta: EphemMeta;
+  private readonly data: Float32Array;
+
+  constructor(meta: EphemMeta, data: Float32Array) {
+    this.meta = meta;
+    this.data = data;
     this.t0 = Date.parse(meta.start_utc);
     this.stepMs = meta.step_s * 1000;
     this.n = meta.n;
@@ -104,10 +109,12 @@ export function xyToLatLon(x: number, y: number): [number, number] {
 
 /** Horizon: terrain elevation (deg) for n equal azimuth steps from north. */
 export class Horizon {
+  readonly elev: Float32Array;
   readonly n: number;
   readonly step: number;
 
-  constructor(readonly elev: Float32Array) {
+  constructor(elev: Float32Array) {
+    this.elev = elev;
     this.n = elev.length;
     this.step = 360 / this.n;
   }
