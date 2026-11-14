@@ -60,6 +60,16 @@ class Band:
     d_max: float  # m
     step: float  # m
     sources: tuple[str, ...]
+    growth: float = 0.0  # >0: step grows with distance, step_k = max(step, growth * d_k)
+
+    def distances(self) -> np.ndarray:
+        if self.growth <= 0:
+            return np.arange(self.d_min, self.d_max, self.step)
+        out, d = [], self.d_min
+        while d < self.d_max:
+            out.append(d)
+            d += max(self.step, self.growth * d)
+        return np.array(out)
 
 
 # Layers within a band by priority; where one ends (NaN) the next is used.
@@ -364,7 +374,7 @@ def compute_horizon(stack: DemStack, x: float, y: float, height: float = 2.0,
     n_missing = n_total = 0
 
     for band in bands:
-        d = np.arange(band.d_min, band.d_max, band.step)
+        d = band.distances()
         for a0 in range(0, n_az, az_chunk):
             sl = slice(a0, a0 + az_chunk)
             X = x + dirs[sl, 0:1] * d
