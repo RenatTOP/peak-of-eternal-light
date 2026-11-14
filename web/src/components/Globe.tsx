@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 
-import { DATA_URL, type AppData, type GlobeCap } from "../lib/data";
+import { DATA_URL, type AppData, type GlobeCap, type Mission } from "../lib/data";
 import { T, sunAlpha } from "../lib/theme";
 import { Brackets } from "./hud";
 
@@ -17,6 +17,9 @@ interface Props {
   earthDir: Vec3;
   onPick: (lat: number, lon: number) => void;
   onZoomPole: () => void;
+  missions: Mission[];
+  missionId: string;
+  focus: { lat: number; lon: number; key: number } | null; // turn the globe to this point
 }
 
 // MOON_ME (x to Earth, z north) -> three.js coordinates (y up) and back
@@ -148,9 +151,35 @@ interface Overlay {
   pole: { x: number; y: number; visible: boolean };
   zone: { x: number; y: number } | null; // where to label the analysis zone edge
   zoneLat: number;
+  mission: { x: number; y: number; name: string; status: Mission["status"] } | null; // chosen mission, if visible
 }
 
-export function Globe({ data, selectedId, sunPctById, sunDir, earthDir, onPick, onZoomPole }: Props) {
+// Circle on the surface: planned landing region (exact spot unpublished)
+function surfaceCircle(lat: number, lon: number, radiusKm: number): THREE.BufferGeometry {
+  const c = toThree(unit(lat, lon));
+  const e1 = new THREE.Vector3(0, 1, 0).cross(c);
+  if (e1.lengthSq() < 1e-8) e1.set(1, 0, 0);
+  e1.normalize();
+  const e2 = new THREE.Vector3().crossVectors(c, e1);
+  const a = radiusKm / 1737.4;
+  const pts: THREE.Vector3[] = [];
+  for (let k = 0; k < 128; k++) {
+    const t = (2 * Math.PI * k) / 128;
+    pts.push(c.clone().multiplyScalar(Math.cos(a))
+      .addScaledVector(e1, Math.sin(a) * Math.cos(t)).addScaledVector(e2, Math.sin(a) * Math.sin(t)).multiplyScalar(1.002));
+  }
+  return new THREE.BufferGeometry().setFromPoints(pts);
+}
+
+/** Orientation with (lat, lon) facing the camera and north up. */
+function lookAt(lat: number, lon: number): THREE.Quaternion {
+  const c = toThree(unit(lat, lon));
+  const up = toThree(unit(lat + 90, lon));
+  const right = new THREE.Vector3().crossVectors(up, c);
+  return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, c).transpose());
+}
+
+export function Globe({ data, selectedId, sunPctById, sunDir, earthDir, onPick, onZoomPole, missions, missionId, focus }: Props) {
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const gl = useRef<{
@@ -161,12 +190,15 @@ export function Globe({ data, selectedId, sunPctById, sunDir, earthDir, onPick, 
     mesh: THREE.Mesh;
     light: THREE.DirectionalLight;
     markers: Map<string, THREE.Mesh>;
+    missionMarks: Map<string, THREE.Object3D>;
     render: () => void;
   } | null>(null);
   const dirs = useRef({ sun: sunDir, earth: earthDir });
   dirs.current = { sun: sunDir, earth: earthDir };
   const handlers = useRef({ onPick, onZoomPole });
   handlers.current = { onPick, onZoomPole };
+  const missionRef = useRef({ missions, missionId });
+  missionRef.current = { missions, missionId };
   const [ov, setOv] = useState<Overlay | null>(null);
   const [ready, setReady] = useState(false);
   const zoomed = useRef(false); // the user zoomed; don't refit to size
@@ -228,10 +260,30 @@ export function Globe({ data, selectedId, sunPctById, sunDir, earthDir, onPick, 
     scene.add(light, new THREE.AmbientLight(0x9ec3dc, 0.05));
 
     // orientation: point (VIEW_LAT, 0) faces the camera, north up
-    const c = toThree(unit(VIEW_LAT, 0));
-    const up = toThree(unit(VIEW_LAT + 90, 0));
-    const right = new THREE.Vector3().crossVectors(up, c);
-    moon.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, c).transpose());
+    moon.quaternion.copy(lookAt(VIEW_LAT, 0));
+
+    // missions: diamond = actual landing, dashed circle = planned region
+    const missionMarks = new Map<string, THREE.Object3D>();
+    for (const ms of missions) {
+      const { lat, lon, precision, radius_km } = ms.where;
+      if (lat === undefined || lon === undefined) continue;
+      let o: THREE.Object3D;
+      if (precision === "landed") {
+        o = new THREE.Mesh(new THREE.OctahedronGeometry(1), new THREE.MeshBasicMaterial({
+          color: ms.status === "failure" ? T.empty : T.text }));
+        o.position.copy(toThree(unit(lat, lon)).multiplyScalar(1.0015));
+        o.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), toThree(unit(lat, lon)));
+        o.userData.size = 0.0075;
+      } else {
+        const ring = new THREE.LineLoop(surfaceCircle(lat, lon, radius_km ?? 30),
+          new THREE.LineDashedMaterial({ color: T.bracket, dashSize: 0.004, gapSize: 0.003, transparent: true, opacity: 0.9 }));
+        ring.computeLineDistances();
+        o = ring;
+      }
+      o.renderOrder = 4;
+      moon.add(o);
+      missionMarks.set(ms.id, o);
+    }
 
     const markers = new Map<string, THREE.Mesh>();
     for (const s of data.sites) {
@@ -249,6 +301,7 @@ export function Globe({ data, selectedId, sunPctById, sunDir, earthDir, onPick, 
       // markers keep a constant screen size, not kilometres
       const zk = Math.min(1, (camera.position.z - 1) / (DIST0 - 1));
       for (const m of markers.values()) m.scale.setScalar((m.userData.size as number ?? 0.0065) * zk);
+      for (const o of missionMarks.values()) if (o.userData.size) o.scale.setScalar((o.userData.size as number) * zk);
       renderer.render(scene, camera);
       // overlay: disc radius on screen, Sun and Earth directions, where the pole is
       const d = camera.position.z;
@@ -269,11 +322,22 @@ export function Globe({ data, selectedId, sunPctById, sunDir, earthDir, onPick, 
       }
       const pole = toThree([0, 0, -1]).applyQuaternion(moon.quaternion);
       const pp = pole.clone().project(camera);
+      // label of the chosen mission, if its place is on the visible side
+      const { missions: ml, missionId: mid } = missionRef.current;
+      const sel = ml.find((x) => x.id === mid);
+      let mission: Overlay["mission"] = null;
+      if (sel && sel.where.lat !== undefined && sel.where.lon !== undefined) {
+        const p = toThree(unit(sel.where.lat, sel.where.lon)).applyQuaternion(moon.quaternion);
+        if (p.z > 1.05 / d) {
+          const q = p.clone().project(camera);
+          mission = { x: (q.x + 1) * w / 2, y: (1 - q.y) * h / 2, name: sel.name, status: sel.status };
+        }
+      }
       setOv({
         w, h, cx: w / 2, cy: h / 2, r,
         sunA: ang(dirs.current.sun), earthA: ang(dirs.current.earth),
         pole: { x: (pp.x + 1) * w / 2, y: (1 - pp.y) * h / 2, visible: pole.z > 1 / d },
-        zone: zoneAt, zoneLat: zone.outerLat,
+        zone: zoneAt, zoneLat: zone.outerLat, mission,
       });
     };
 
@@ -293,7 +357,7 @@ export function Globe({ data, selectedId, sunPctById, sunDir, earthDir, onPick, 
     };
     const ro = new ResizeObserver(resize);
     ro.observe(box);
-    gl.current = { renderer, scene, camera, moon, mesh, light, markers, render };
+    gl.current = { renderer, scene, camera, moon, mesh, light, markers, missionMarks, render };
     if (import.meta.env.DEV) Object.assign(window, { __globe: { ...gl.current, THREE, toThree, unit } });
     resize();
     return () => {
@@ -315,9 +379,42 @@ export function Globe({ data, selectedId, sunPctById, sunDir, earthDir, onPick, 
       mat.opacity = s.group === "candidate" ? sunAlpha(sunPctById[s.id] ?? 50) : 1;
       mat.transparent = mat.opacity < 1;
       m.userData.size = sel ? 0.012 : 0.0065;
+      m.visible = s.group !== "mission"; // landed missions drawn as diamonds (missionMarks)
     }
     g.render();
   }, [data, selectedId, sunPctById]);
+
+  // --- chosen mission: brighter, label updated
+  useEffect(() => {
+    const g = gl.current;
+    if (!g) return;
+    for (const [id, o] of g.missionMarks) {
+      if (o instanceof THREE.LineLoop) (o.material as THREE.LineDashedMaterial).opacity = id === missionId ? 1 : 0.55;
+      else o.userData.size = id === missionId ? 0.011 : 0.0075;
+    }
+    g.render();
+  }, [missionId]);
+
+  // --- turn the globe to a point (mission view): smoothly, in ~0.9 s
+  useEffect(() => {
+    const g = gl.current;
+    if (!g || !focus) return;
+    const from = g.moon.quaternion.clone();
+    const to = lookAt(focus.lat, focus.lon);
+    const t0 = performance.now();
+    let raf = 0;
+    const step = () => {
+      const k = Math.min(1, (performance.now() - t0) / 900);
+      const e = k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2;
+      g.moon.quaternion.slerpQuaternions(from, to, e);
+      g.render();
+      if (k < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    // a hidden tab draws no frames, so just set the final position
+    const snap = setTimeout(() => { g.moon.quaternion.copy(to); g.render(); }, 1200);
+    return () => { cancelAnimationFrame(raf); clearTimeout(snap); };
+  }, [focus]);
 
   // --- light moves with the time cursor
   useEffect(() => {
@@ -498,6 +595,12 @@ function GlobeOverlay({ ov, data, selectedId, onZoomPole }: {
                                           transform: Math.cos(ov.earthA) < 0 ? "translateX(-100%)" : undefined }}>
         <b style={{ color: T.earth }}>EARTH</b><span>near side</span>
       </div>
+      {ov.mission && (
+        <div className="mission-tag" style={{ left: ov.mission.x, top: ov.mission.y }}>
+          <b>{ov.mission.name}</b>
+          <span>{ov.mission.status === "planned" ? "planned landing region" : ov.mission.status === "failure" ? "landing failed" : "landed here"}</span>
+        </div>
+      )}
       {ov.zone && (
         <div className="zone-label" style={{ left: ov.zone.x, top: ov.zone.y }}>
           <b>ANALYSIS ZONE</b><span>any spot south of {Math.round(-ov.zoneLat)}°S</span>

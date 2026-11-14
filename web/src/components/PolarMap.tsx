@@ -4,7 +4,7 @@ import "leaflet/dist/leaflet.css";
 import { useEffect, useRef, useState } from "react";
 
 import { latLonToXY, xyToLatLon } from "../lib/astro";
-import { DATA_URL, type AppData, type Bounds } from "../lib/data";
+import { DATA_URL, type AppData, type Bounds, type Mission } from "../lib/data";
 import { fmtLat, fmtLon } from "../lib/format";
 import { T, sunAlpha } from "../lib/theme";
 
@@ -28,6 +28,7 @@ interface Props {
   picked: { x: number; y: number } | null;
   pickedTag: MapTag | null;
   pickedLink: { x: number; y: number } | null; // nearest catalog site
+  missions: Mission[]; // planned landing regions as dashed circles
 }
 
 /** Leaflet in polar stereographic metres: LatLng = (y, x). */
@@ -174,6 +175,30 @@ export function PolarMap(props: Props) {
     }
   }, [overlays]);
 
+  // --- planned mission regions: exact spot unpublished, so a circle, not a point
+  useEffect(() => {
+    const m = map.current;
+    if (!m) return;
+    const g = L.layerGroup().addTo(m);
+    const tags = L.layerGroup(); // labels only up close; regions overlap near the pole
+    for (const ms of props.missions) {
+      const w = ms.where;
+      if (ms.status !== "planned" || w.x === undefined || w.y === undefined) continue;
+      L.circle(ll(w.x, w.y), {
+        radius: (w.radius_km ?? 30) * 1000, color: T.bracket, weight: 1.2, dashArray: "5 4", fill: false, interactive: false,
+      }).addTo(g);
+      L.marker(ll(w.x, w.y), {
+        interactive: false,
+        icon: L.divIcon({ className: "", iconSize: undefined, iconAnchor: [0, 0],
+                          html: `<div class="mission-label">${ms.name}<span>planned · ${ms.launch}</span></div>` }),
+      }).addTo(tags);
+    }
+    const sync = () => { if (m.getZoom() >= 5) tags.addTo(m); else tags.remove(); };
+    m.on("zoomend", sync);
+    sync();
+    return () => { m.off("zoomend", sync); g.remove(); tags.remove(); };
+  }, [props.missions]);
+
   // --- catalog site markers and labels
   useEffect(() => {
     const m = map.current;
@@ -196,7 +221,7 @@ export function PolarMap(props: Props) {
       const mission = site.group === "mission";
       const psr = site.group === "psr";
       mk.setStyle({
-        color: mission ? T.earth : T.bg, weight: mission ? 2 : 2,
+        color: mission ? T.text : T.bg, weight: mission ? 2 : 2,
         fillColor: mission ? T.bg : psr ? T.psr : T.sun,
         fillOpacity: mission ? 0.9 : psr ? 1 : sunAlpha(pct), radius: mission ? 5.5 : 5,
       });

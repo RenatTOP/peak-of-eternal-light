@@ -64,6 +64,35 @@ export interface AppData {
   globe: GlobeMeta | null;
   anyPoint: AnyPoint | null; // horizon of any point (near terrain + far-mountain grid)
   clones: ClonesIndex | null; // which sites have horizon variants from terrain error
+  missions: MissionsFile | null;
+}
+
+export type MissionStatus = "success" | "partial" | "failure" | "planned";
+
+export interface Mission {
+  id: string;
+  name: string;
+  provider: string;
+  lander: string;
+  task_order?: string;
+  launch: string; // ISO date or plan text ("NET Q1 2027")
+  landing: string | null;
+  end: string | null;
+  status: MissionStatus;
+  outcome: string;
+  site?: string; // catalog site id
+  where: { name: string; precision: "landed" | "region" | "none"; lat?: number; lon?: number; x?: number; y?: number;
+           radius_km?: number };
+  window: [string, string] | null; // analysis period
+  payloads: string[];
+  sources: string[];
+  group: "clps" | "other";
+}
+
+export interface MissionsFile {
+  as_of: string;
+  source: string;
+  missions: Mission[];
 }
 
 export interface ClonesIndex {
@@ -109,12 +138,13 @@ export async function loadAppData(onStep: (s: LoadStep) => void = () => {}): Pro
     json<GlobeMeta>("globe/globe.json").catch(() => null),
     AnyPoint.load(httpLoader(BASE)).catch(() => null),
     json<ClonesIndex>("horizons/clones/index.json").catch(() => null),
+    json<MissionsFile>("missions.json").catch(() => null),
   ]).then((r) => {
     onStep("map");
     return r;
   });
-  const [ephem, { sites, horizons }, [map, overlays, closeups, globe, anyPoint, clones]] = await Promise.all([ephemP, sitesP, mapP]);
-  return { ephem, sites, horizons, map, overlays, closeups, globe, anyPoint, clones };
+  const [ephem, { sites, horizons }, [map, overlays, closeups, globe, anyPoint, clones, missions]] = await Promise.all([ephemP, sitesP, mapP]);
+  return { ephem, sites, horizons, map, overlays, closeups, globe, anyPoint, clones, missions };
 }
 
 const cloneCache = new Map<string, Promise<Horizon[] | null>>();

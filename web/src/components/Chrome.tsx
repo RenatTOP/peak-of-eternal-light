@@ -6,8 +6,8 @@ import { T } from "../lib/theme";
 import { Emblem, Head, Panel } from "./hud";
 import { Timeline } from "./Timeline";
 
-export type Tab = "explore" | "compare" | "method";
-const TABS: [Tab, string][] = [["explore", "EXPLORE"], ["compare", "COMPARE"], ["method", "DATA & METHOD"]];
+export type Tab = "explore" | "compare" | "missions" | "method";
+const TABS: [Tab, string][] = [["explore", "EXPLORE"], ["compare", "COMPARE"], ["missions", "MISSIONS"], ["method", "DATA & METHOD"]];
 
 export function Header({ tab, onTab, clock }: { tab: Tab; onTab: (t: Tab) => void; clock: number | null }) {
   const iso = clock === null ? "" : new Date(clock).toISOString();

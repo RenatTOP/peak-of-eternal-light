@@ -4,13 +4,14 @@ import { Boot, Header, MobileNav, TimeBar, type Tab } from "./components/Chrome"
 import { ComparePage, type CompareRow } from "./components/ComparePage";
 import { Head, Panel } from "./components/hud";
 import { MethodPage } from "./components/MethodPage";
+import { MissionsPage } from "./components/MissionsPage";
 import { PowerCard } from "./components/PowerCard";
 import { PolarMap, type OverlayKey } from "./components/PolarMap";
 import { ResultPanel } from "./components/ResultPanel";
 import { SiteCard, type ListRow } from "./components/SiteCard";
 import type { PointHorizon } from "./lib/anypoint";
 import { analyze, computeSeries, computeTrack, latLonToXY, xyToLatLon, type Analysis, type Horizon, type Observer } from "./lib/astro";
-import { loadAppData, loadClones, type AppData, type LoadStep, type SiteInfo } from "./lib/data";
+import { loadAppData, loadClones, type AppData, type LoadStep, type Mission, type SiteInfo } from "./lib/data";
 import { batteryNeeded, generation, POWER_PRESETS, simulate, type PowerConfig } from "./lib/power";
 import { terrainSpread } from "./lib/spread";
 import { autoStepMs, DAY_MS, fmtLat, fmtLon } from "./lib/format";
@@ -27,6 +28,7 @@ function run(data: AppData, obs: Observer, horizon: Horizon, start: number, days
 }
 
 const POWER_KEY = "pel.power";
+const NO_MISSIONS: Mission[] = [];
 
 function savedPower(): PowerConfig {
   try {
@@ -39,7 +41,7 @@ function savedPower(): PowerConfig {
 const siteObserver = (s: SiteInfo): Observer => ({ lat: s.lat, lon: s.lon, elevM: s.ground_z + s.horizon_height_m });
 
 const KIND: Record<string, [string, string]> = {
-  candidate: ["Candidate site", T.sun], mission: ["Landed mission", T.earth], psr: ["Permanent shadow", T.psr],
+  candidate: ["Candidate site", T.sun], mission: ["Landed mission", T.text], psr: ["Permanent shadow", T.psr],
 };
 
 interface Picked {
@@ -80,6 +82,9 @@ export default function App() {
   const [overlays, setOverlays] = useState<Record<OverlayKey, boolean>>({ sun: false, earth: false, psr: false });
   const [power, setPower] = useState<PowerConfig>(savedPower);
   const [clones, setClones] = useState<{ id: string; h: Horizon[] } | null>(null);
+  const [missionId, setMissionId] = useState("im-1");
+  // where to turn the globe (mission view); key so a repeat click works too
+  const [globeFocus, setGlobeFocus] = useState<{ lat: number; lon: number; key: number } | null>(null);
 
   useEffect(() => {
     try { localStorage.setItem(POWER_KEY, JSON.stringify(power)); } catch { /* not critical */ }
@@ -204,8 +209,25 @@ export default function App() {
     const [x, y] = latLonToXY(lat, lon);
     pickXY(x, y);
   };
+  // mission -> landing site analysis: catalog site or any point, period = mission dates
+  const analyseMission = (m: Mission) => {
+    if (m.window && data) {
+      const t0 = Math.max(Date.parse(m.window[0] + "T00:00:00Z"), data.ephem.start);
+      setStart(t0);
+      setDays(Math.max(1, (Date.parse(m.window[1] + "T00:00:00Z") - t0) / DAY_MS));
+    }
+    if (m.site) openSite(m.site);
+    else if (m.where.x !== undefined && m.where.y !== undefined) pickXY(m.where.x, m.where.y);
+  };
+  const showMissionOnGlobe = (m: Mission) => {
+    if (m.where.lat === undefined || m.where.lon === undefined) return;
+    setGlobeFocus({ lat: m.where.lat, lon: m.where.lon, key: Date.now() });
+    setTab("explore");
+    setStage("globe");
+  };
 
   if (!data) return <Boot done={loaded} error={error} />;
+  const missionsList = data.missions?.missions ?? NO_MISSIONS;
 
   const nearest = picked ? [...data.sites].map((s) => ({ s, d: Math.hypot(s.x - picked.x, s.y - picked.y) })).sort((a, b) => a.d - b.d) : [];
   const m = view?.analysis.metrics;
@@ -290,7 +312,8 @@ export default function App() {
           <div className="stage-layer" hidden={stage !== "globe"}>
             <Suspense fallback={null}>
               <Globe data={data} selectedId={picked ? null : selectedId} sunPctById={sunPctById}
-                     sunDir={dirs.sun} earthDir={dirs.earth} onPick={pickLatLon} onZoomPole={() => setStage("map")} />
+                     sunDir={dirs.sun} earthDir={dirs.earth} onPick={pickLatLon} onZoomPole={() => setStage("map")}
+                missions={missionsList} missionId={missionId} focus={globeFocus} />
             </Suspense>
           </div>
           {mapSeen && (
@@ -302,7 +325,8 @@ export default function App() {
                         onSelect={openSite} onPick={pickXY} onGlobe={() => setStage("globe")}
                         picked={picked && { x: picked.x, y: picked.y }}
                         pickedTag={picked ? { title: "SELECTED POINT", line: `${fmtLat(picked.lat)} ${fmtLon(picked.lon)}` } : null}
-                        pickedLink={picked?.status === "ok" && nearest[0] ? { x: nearest[0].s.x, y: nearest[0].s.y } : null} />
+                        pickedLink={picked?.status === "ok" && nearest[0] ? { x: nearest[0].s.x, y: nearest[0].s.y } : null}
+                        missions={missionsList} />
             </div>
           )}
           {card}
@@ -316,6 +340,12 @@ export default function App() {
           <ComparePage rows={rows} selectedId={selectedId} onOpen={openSite} period={periodLabel(start, days)}
                        battery={batteryById} craft={POWER_PRESETS.find((p) => JSON.stringify(p.cfg) === JSON.stringify(power))?.label.toLowerCase() ?? "custom craft"} />
           {timebar}
+        </main>
+      )}
+      {tab === "missions" && data.missions && (
+        <main className="missions">
+          <MissionsPage data={data.missions} selectedId={missionId} onSelect={setMissionId}
+                        onAnalyse={analyseMission} onGlobe={showMissionOnGlobe} />
         </main>
       )}
       {tab === "method" && <MethodPage />}

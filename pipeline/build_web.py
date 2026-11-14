@@ -57,7 +57,7 @@ TILE = 256
 BASE_MAX_Z = 5
 DETAIL_ZOOMS = (6, 7)
 
-EPHEM_START = "2024-01-01T00:00:00"
+EPHEM_START = "2023-07-01T00:00:00"
 EPHEM_END = "2036-01-01T00:00:00"
 
 
@@ -482,6 +482,43 @@ def build_globe() -> None:
         "source": "NASA SVS CGI Moon Kit: LROC WAC color, LOLA LDEM 16 ppd; south cap: LOLA 240 m polar DEM; lens: LOLA 40 m hillshade",
     }, indent=1), encoding="utf-8")
     log(f"globe: texture {GLOBE_W}x{GLOBE_H}, normals, caps, lens {LENS_PX}px")
+
+
+# --------------------------------------------------------------------------- #
+# CLPS missions (data/missions.yaml)
+# --------------------------------------------------------------------------- #
+
+MISSION_STATUS = ("success", "partial", "failure", "planned")
+
+
+def build_missions() -> None:
+    """missions.json: mission catalog for the MISSIONS page, globe and map.
+
+    Validates fields; adds x, y (polar stereographic map) for places south of 60°."""
+    import yaml
+
+    raw = yaml.safe_load((ROOT / "data" / "missions.yaml").read_text(encoding="utf-8"))
+    sites = {s.id: s for s in web_sites()}
+    out = []
+    for group, items in (("clps", raw["missions"]), ("other", raw.get("others", []))):
+        for m in items:
+            assert m["status"] in MISSION_STATUS, (m["id"], m["status"])
+            w = dict(m.get("where") or {})
+            if m.get("site"):
+                assert m["site"] in sites, (m["id"], m["site"])
+            if "lat" in w:
+                w["lon"] = float(w["lon"]) % 360.0
+                if w["lat"] <= -60:
+                    w["x"], w["y"] = latlon_to_xy(w["lat"], w["lon"])
+            if m.get("window"):
+                assert all(len(str(d)) == 10 for d in m["window"]), m["id"]
+            out.append({**m, "where": w, "group": group,
+                        "window": [str(d) for d in m.get("window", [])] or None,
+                        "launch": str(m["launch"]), "landing": m.get("landing"), "end": str(m["end"]) if m.get("end") else None})
+    (WEB_DATA / "missions.json").write_text(json.dumps({
+        "as_of": "2026-09", "source": "NASA CLPS deliveries; per-mission sources listed",
+        "missions": out}, indent=1, ensure_ascii=False), encoding="utf-8")
+    log(f"missions: {len(out)} ({sum(m['status'] != 'planned' for m in out)} flown)")
 
 
 STEPS = {

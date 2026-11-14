@@ -15,7 +15,7 @@ export interface CompareRow {
 
 type Key = "sun" | "night" | "battery" | "earth" | "gap" | "both";
 const KIND: Record<string, [string, string]> = {
-  candidate: ["", T.muted], mission: ["Landed", T.earth], psr: ["Permanent shadow", T.psr],
+  candidate: ["", T.muted], mission: ["Landed", T.text], psr: ["Permanent shadow", T.psr],
 };
 
 function value(r: CompareRow, k: Key, battery: Record<string, number>): number {
