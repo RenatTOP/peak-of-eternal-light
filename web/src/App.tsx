@@ -175,13 +175,13 @@ export default function App() {
       );
     } else if (selected) {
       const ranked = [...rows].sort((a, b) => b.analysis.metrics.sunMeanPct - a.analysis.metrics.sunMeanPct);
-      let top = ranked.slice(0, 8);
-      if (!top.some((r) => r.site.id === selected.id)) top = [...top.slice(0, 7), ranked.find((r) => r.site.id === selected.id)!];
+      let top = ranked.slice(0, 6);
+      if (!top.some((r) => r.site.id === selected.id)) top = [...top.slice(0, 5), ranked.find((r) => r.site.id === selected.id)!];
       const [kind, kcol] = KIND[selected.group];
       left = (
         <SiteCard title={selected.name} kind={kind} kindColor={kcol}
                   coords={`${fmtLat(selected.lat)} ${fmtLon(selected.lon)} · ${Math.round(selected.ground_z)} m`}
-                  note={selected.note} metrics={m} periodDays={days} listTitle="SITES · SOLAR ENERGY"
+                  metrics={m} periodDays={days} listTitle="SITES · SOLAR ENERGY"
                   list={top.map((r) => ({ id: r.site.id, name: r.site.name, pct: r.analysis.metrics.sunMeanPct, on: r.site.id === selected.id }))}
                   onSelect={openSite} onCompare={() => setTab("compare")} compareCount={data.sites.length} />
       );

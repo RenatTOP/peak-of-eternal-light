@@ -207,7 +207,7 @@ export function PolarMap(props: Props) {
     const site = data.sites.find((s) => s.id === selectedId);
     if (site && !picked) {
       const c = data.closeups[site.id];
-      if (c) L.imageOverlay(DATA_URL(c.file), llBounds(c.bounds), { opacity: 0.92, interactive: false }).addTo(f).bringToBack();
+      if (c) L.imageOverlay(DATA_URL(c.file), llBounds(c.bounds), { opacity: 0.95, interactive: false, className: "closeup" }).addTo(f).bringToBack();
       if (c) L.rectangle(llBounds(c.bounds), { color: T.sun, weight: 1, opacity: 0.5, fill: false, interactive: false }).addTo(f);
       L.marker(ll(site.x, site.y), { icon: reticle(T.sun), interactive: false }).addTo(f);
       if (selectedTag) L.marker(ll(site.x, site.y), { icon: tagIcon(selectedTag, T.sun), interactive: false }).addTo(f);

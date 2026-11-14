@@ -98,6 +98,8 @@ async function loadJson<T>(load: Loader, path: string): Promise<T | null> {
 }
 
 /** Cumulative sum with int16 overflow (as encoded on the Python side). */
+export const undeltaForTest = (src: Int16Array, rowLen: number) => undelta(src, rowLen);
+
 function undelta(src: Int16Array, rowLen: number): Int16Array {
   const out = new Int16Array(src.length);
   for (let r = 0; r < src.length; r += rowLen) {

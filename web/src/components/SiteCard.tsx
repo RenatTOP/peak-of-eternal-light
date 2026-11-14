@@ -36,10 +36,10 @@ export function SiteCard(p: Props) {
   return (
     <Panel className="left scroll">
       <Head num="01" label={p.kind.toUpperCase() === "SELECTED POINT" ? "SELECTED POINT" : "SITE"}
-            right={p.kind.toUpperCase() === "SELECTED POINT" ? "click the map to move it" : "pick on the map or below"} />
+            right={p.kind.toUpperCase() === "SELECTED POINT" ? "click to move" : "pick on the map or below"} />
       <div className="title">{p.title}</div>
       <div className="coords">{p.coords}</div>
-      <div className="kind" style={{ color: p.kindColor, marginTop: 6 }}>{p.kind.toUpperCase()}</div>
+      {p.kind.toUpperCase() !== "SELECTED POINT" && <div className="kind" style={{ color: p.kindColor, marginTop: 6 }}>{p.kind.toUpperCase()}</div>}
       {p.notice && <div className="notice">{p.notice}</div>}
       <div className="gauges">
         <Gauge frac={m.sunMeanPct / 100} value={m.sunMeanPct.toFixed(0)} unit="%" label="Solar energy" color={T.sun}

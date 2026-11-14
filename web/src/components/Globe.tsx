@@ -61,6 +61,7 @@ export function Globe({ data, selectedId, sunPctById, sunDir, earthDir, onPick, 
   const handlers = useRef({ onPick, onZoomPole });
   handlers.current = { onPick, onZoomPole };
   const [ov, setOv] = useState<Overlay | null>(null);
+  const zoomed = useRef(false); // the user zoomed; don't refit to size
 
   // --- scene (once)
   useEffect(() => {
@@ -130,6 +131,12 @@ export function Globe({ data, selectedId, sunPctById, sunDir, earthDir, onPick, 
       renderer.setSize(w, h, false);
       camera.aspect = w / Math.max(h, 1);
       camera.updateProjectionMatrix();
+      if (!zoomed.current) {
+        // disc with rings (+46 px) and labels fits in the scene
+        const target = Math.max(80, Math.min(w, h) / 2 - 64);
+        const k = (h / 2) / (Math.tan((FOV * Math.PI) / 360) * target);
+        camera.position.z = Math.sqrt(k * k + 1);
+      }
       render();
     };
     const ro = new ResizeObserver(resize);
@@ -179,7 +186,7 @@ export function Globe({ data, selectedId, sunPctById, sunDir, earthDir, onPick, 
       const dx = e.clientX - drag.x;
       const dy = e.clientY - drag.y;
       drag = { x: e.clientX, y: e.clientY, moved: drag.moved + Math.abs(dx) + Math.abs(dy) };
-      const k = 0.0045 * (g.camera.position.z - 1) / (DIST0 - 1);
+      const k = 0.004 * Math.min(1, (g.camera.position.z - 1) / (DIST0 - 1));
       const q = new THREE.Quaternion()
         .setFromAxisAngle(new THREE.Vector3(0, 1, 0), dx * k)
         .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), dy * k));
@@ -207,6 +214,7 @@ export function Globe({ data, selectedId, sunPctById, sunDir, earthDir, onPick, 
       const g = gl.current;
       if (!g) return;
       e.preventDefault();
+      zoomed.current = true;
       g.camera.position.z = Math.min(9, Math.max(1.35, g.camera.position.z * (1 + e.deltaY * 0.0012)));
       g.render();
     };
@@ -278,10 +286,11 @@ function GlobeOverlay({ ov, data, selectedId, onZoomPole }: {
         {ov.pole.visible && <circle cx={ov.pole.x} cy={ov.pole.y} r="16" fill="none" stroke={T.sun} strokeWidth="1.5" />}
         {lead}
       </svg>
-      <div className="dir-label" style={{ left: sx + (Math.cos(ov.sunA) < 0 ? -18 : 16), top: sy + 16 }}>
+      <div className="dir-label" style={{ left: sx, top: sy + 16, transform: "translateX(-50%)", textAlign: "center" }}>
         <b style={{ color: T.sun }}>SUN</b><span>grazing the pole</span>
       </div>
-      <div className="dir-label" style={{ left: ex + 18, top: ey - 16 }}>
+      <div className="dir-label" style={{ left: ex + (Math.cos(ov.earthA) < 0 ? -18 : 18), top: ey - 16,
+                                          transform: Math.cos(ov.earthA) < 0 ? "translateX(-100%)" : undefined }}>
         <b style={{ color: T.earth }}>EARTH</b><span>near side</span>
       </div>
       {lens && (

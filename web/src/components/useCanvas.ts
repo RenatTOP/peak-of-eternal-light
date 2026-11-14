@@ -15,8 +15,12 @@ export function useCanvas(ref: RefObject<HTMLCanvasElement | null>): CanvasSize 
     const update = () => {
       const r = cv.getBoundingClientRect();
       const dpr = window.devicePixelRatio || 1;
-      cv.width = Math.round(r.width * dpr);
-      cv.height = Math.round(r.height * dpr);
+      const w = Math.round(r.width * dpr);
+      const h = Math.round(r.height * dpr);
+      // assigning width/height clears the canvas, so only when the size really changed
+      if (cv.width === w && cv.height === h) return;
+      cv.width = w;
+      cv.height = h;
       setSize({ w: r.width, h: r.height, dpr });
     };
     update();
