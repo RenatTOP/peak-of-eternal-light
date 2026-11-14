@@ -54,7 +54,7 @@ describe("disc", () => {
   });
 });
 
-describe.each(reference.map((r: { site: string }) => [r.site, r]))("Python reference: %s", (id, ref) => {
+describe.each((reference as { site: string }[]).map((r) => [r.site, r as any] as [string, any]))("Python reference: %s", (id, ref) => {
   const site = sites.find((s: { id: string }) => s.id === id);
   const start = Date.parse(ref.start_utc);
   const step = ref.step_h * 3.6e6;

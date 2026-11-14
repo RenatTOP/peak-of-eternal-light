@@ -86,6 +86,9 @@ code { display: block; margin-top: 6px; padding: 6px 8px; background: #0005; bor
 .near-side { background: #0b1226dd; border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px;
              font-size: 11px; color: var(--earth); }
 
+.map-hint { position: absolute; left: 50%; bottom: 26px; transform: translateX(-50%); z-index: 500;
+            background: #0b1226cc; border: 1px solid var(--line); border-radius: 99px; padding: 4px 12px;
+            font-size: 12px; color: var(--muted); pointer-events: none; white-space: nowrap; }
 .picked-card { position: absolute; left: 12px; bottom: 34px; z-index: 600; width: 340px;
                background: #0b1226f2; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
 .picked-card .close { position: absolute; right: 6px; top: 2px; background: none; border: 0; font-size: 18px;
@@ -130,12 +133,13 @@ tbody tr:hover { background: #ffffff0a; }
 .note { color: var(--muted); font-size: 12px; white-space: pre-line; margin-top: 14px; }
 
 /* --- compare --- */
-.compare th { cursor: pointer; white-space: nowrap; }
+.compare th { cursor: pointer; vertical-align: bottom; line-height: 1.25; }
+.compare td:first-child { min-width: 170px; }
 .compare th.sorted { color: var(--gold); }
 .compare tr.selected { background: #f5b52814; }
 .compare td.num { white-space: nowrap; }
 .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
-.bar { display: inline-block; width: 46px; height: 6px; background: #ffffff14; border-radius: 3px; margin-right: 6px;
+.bar { display: inline-block; width: 34px; height: 6px; background: #ffffff14; border-radius: 3px; margin-right: 6px;
        vertical-align: middle; overflow: hidden; }
 .bar > span { display: block; height: 100%; }
 

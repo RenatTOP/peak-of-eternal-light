@@ -123,8 +123,13 @@ export function PolarMap({ data, selectedId, sunPctById, overlays, onSelect, onP
     L.control.scale({ imperial: false, position: "bottomleft" }).addTo(m);
     map.current = m;
     return () => {
+      // layers are bound to this map: StrictMode creates it twice
       m.remove();
       map.current = null;
+      markers.current.clear();
+      overlayLayers.current = null;
+      closeup.current = null;
+      pickMarker.current = null;
     };
   }, [data]);
 

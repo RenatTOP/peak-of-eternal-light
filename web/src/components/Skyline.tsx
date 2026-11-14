@@ -37,7 +37,9 @@ export function Skyline({ horizon, series, cursor }: Props) {
     // elevation range: tracks below the terrain are hidden anyway
     const n = series.t.length;
     const hi = Math.max(horizon.max, quantile(series.sunAlt, 0.995), quantile(series.earthAlt, 0.995), 2) + 0.8;
-    const lo = Math.min(horizon.min, -1) - 1.2;
+    // tracks below the terrain are shown too (Earth below the horizon), but no deeper than 8°
+    const floor = Math.min(horizon.min, -1);
+    const lo = Math.max(Math.min(floor, quantile(series.sunAlt, 0.005), quantile(series.earthAlt, 0.005)), floor - 8) - 1.2;
     const X = (az: number) => pad.l + (az / 360) * pw;
     const Y = (el: number) => pad.t + ((hi - el) / (hi - lo)) * ph;
     const degPx = ph / (hi - lo);

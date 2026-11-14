@@ -84,13 +84,19 @@ export function Timeline({ series, cursor, onCursor }: Props) {
     const ticks = timeTicks(series.t[0], series.t[n - 1], span);
     ctx.strokeStyle = C.grid;
     ctx.fillStyle = C.label;
+    let labelEnd = -Infinity;
     for (const [t, label] of ticks) {
       const x = pad.l + ((t - series.t[0]) / span) * pw;
       ctx.beginPath();
       ctx.moveTo(x, pad.t);
       ctx.lineTo(x, h - pad.b);
       ctx.stroke();
-      ctx.fillText(label, x + 2, h - 6);
+      // labels overlapping the previous one are skipped (ticks stay)
+      const tw = ctx.measureText(label).width;
+      if (x + 2 > labelEnd + 8 && x + 2 + tw <= w) {
+        ctx.fillText(label, x + 2, h - 6);
+        labelEnd = x + 2 + tw;
+      }
     }
 
     // cursor
@@ -125,6 +131,8 @@ export function Timeline({ series, cursor, onCursor }: Props) {
   );
 }
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
 function timeTicks(t0: number, t1: number, span: number): [number, string][] {
   const out: [number, string][] = [];
   const d = new Date(t0);
@@ -143,7 +151,7 @@ function timeTicks(t0: number, t1: number, span: number): [number, string][] {
       const t = Date.UTC(y, m, 1);
       if (t > t1) break;
       if (m % monthsStep === 0) {
-        const label = monthsStep === 12 ? `${y}` : new Date(t).toISOString().slice(0, 7);
+        const label = m === 0 || monthsStep === 12 ? `${y}` : MONTHS[m];
         out.push([t, label]);
       }
       m += 1;
