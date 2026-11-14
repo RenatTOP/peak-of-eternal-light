@@ -82,7 +82,10 @@ def inspect(tile: SiteTile) -> TileInfo | None:
 
 
 def fmt(v: float | None, spec: str) -> str:
-    return "—" if v is None else format(v, spec)
+    if v is None:
+        width = int("".join(ch for ch in spec.split(".")[0] if ch.isdigit()) or 0)
+        return "—".rjust(width)
+    return format(v, spec)
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -46,6 +46,8 @@ class Site:
     lon: float  # deg, east positive
     elev: float = 0.0  # m above the R_MOON_KM sphere
     note: str = ""
+    tile: str | None = None  # LOLA 5 m tile, if any
+    refine: bool = False  # coordinate still to be refined on the illumination map
 
     @property
     def label(self) -> str:
@@ -86,6 +88,8 @@ def load_sites(path: Path = SITES_PATH) -> dict[str, Site]:
             lon=float(entry["lon"]),
             elev=float(entry.get("elev", 0.0)),
             note=(entry.get("note") or "").strip(),
+            tile=entry.get("tile"),
+            refine=bool(entry.get("refine", False)),
         )
         sites[site.id] = site
     return sites
@@ -217,7 +221,12 @@ def plot(path: Path, site: Site, ets: np.ndarray, tracks: list[Track]) -> None:
 
     for ax, track in zip(axes, tracks):
         color = colors.get(track.body, "#888888")
-        ax.axhspan(-90, 0, color="#11182c", alpha=0.35, lw=0)
+        # scale to the data: at the pole everything happens within a few degrees
+        pad = 0.15 * max(np.ptp(track.alt), 1.0)
+        lo = min(track.alt.min(), 0.0) - pad
+        hi = max(track.alt_upper_limb.max(), 0.0) + pad
+        ax.set_ylim(lo, hi)
+        ax.axhspan(lo, 0, color="#11182c", alpha=0.18, lw=0)
         ax.plot(days, track.alt, color=color, lw=1.6, label=f"{track.body} disc centre")
         ax.plot(
             days,

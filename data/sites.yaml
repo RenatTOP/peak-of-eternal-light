@@ -1,58 +1,116 @@
-# Candidate points at the lunar south pole.
+# Lunar south pole sites.
 #
 # lat  — latitude, deg, south negative
-# lon  — east longitude, deg (0..360 or -180..180, both work)
-# elev — height above the 1737.4 km sphere, m (0 = sphere; refined from LOLA DEM)
+# lon  — east longitude, deg 0..360
+# elev — surface height above the 1737.4 km sphere, m (LOLA DEM)
+# tile — LOLA 5 m tile (data/dem/sites/<tile>/), if any
 #
-# NOTE: the coordinates below are preliminary, from open sources. Before the final
-# run check each point against the LOLA DEM and fix elev from the terrain.
+# Coordinates of points with a tile are the Barker et al. (2021) tile centre; the tiles were built
+# around the Mazarico et al. (2011) sites. From: python -m pipeline.site_tiles
+#
+# refine: true means the tile centre is not the highest/best-lit point
+# (e.g. on a slope). To be refined once horizon.py computes the tile's illumination map.
 
 sites:
-  - id: shackleton-rim
-    name: Shackleton crater rim
-    lat: -89.68
-    lon: 129.20
-    elev: 0
-    note: |
-      Shackleton crater rim. The classic "peak of eternal light" point in the
-      literature: high illumination on the crest, permanent shadow on the floor.
-
+  # --- lit candidates ------------------------------------------------------
   - id: connecting-ridge
-    name: Connecting Ridge (Shackleton – de Gerlache)
-    lat: -89.45
-    lon: 222.0
-    elev: 0
-    note: Artemis III candidate region, one of the best-lit at the pole.
+    name: Connecting Ridge
+    tile: Site01
+    lat: -89.4632
+    lon: 222.5104
+    elev: 1945
+    note: |
+      Ridge between Shackleton and de Gerlache craters. Artemis III candidate region,
+      one of the best-lit places at the pole.
+
+  - id: shackleton-rim
+    name: Shackleton rim
+    tile: Site04
+    lat: -89.7668
+    lon: 188.13
+    elev: 768
+    refine: true
+    note: |
+      Shackleton crater rim right by the pole. The tile centre is on the inner
+      slope (768 m); the crest, up to 1739 m, is ~2 km away.
+
+  - id: peak-near-shackleton
+    name: Peak near Shackleton
+    tile: Site07
+    lat: -88.8110
+    lon: 123.69
+    elev: 1646
+    note: Isolated peak; the tile centre is on the summit (1649 m, 85 m away).
 
   - id: de-gerlache-rim
-    name: de Gerlache crater rim
-    lat: -88.5
-    lon: 273.0
-    elev: 0
+    name: de Gerlache rim
+    tile: Site11
+    lat: -88.6834
+    lon: 292.07
+    elev: 1794
 
   - id: mons-mouton
-    name: Mons Mouton
-    lat: -84.6
-    lon: 31.0
-    elev: 0
+    name: Mons Mouton plateau (Leibnitz β)
+    tile: Site20
+    lat: -85.4266
+    lon: 31.74
+    elev: 6399
     note: |
-      Plateau south of Nobile crater. VIPER's target; IM-2 Athena landed nearby
-      (84.79°S, 29.20°E, 2025-03-06).
-
-  - id: malapert-massif
-    name: Malapert Massif
-    lat: -86.0
-    lon: 2.7
-    elev: 0
-    note: High massif with good Earth visibility, a historical relay candidate.
+      Summit plateau of Mons Mouton (formerly Leibnitz beta), VIPER's target.
+      Catalogs put the mountain's centre at 84.6°S; the lit plateau is further south.
 
   - id: nobile-rim-1
-    name: Nobile crater rim 1
-    lat: -85.3
-    lon: 31.6
-    elev: 0
+    name: Nobile rim 1
+    tile: Site06
+    lat: -85.4381
+    lon: 37.37
+    elev: 5946
+    refine: true
+    note: Tile centre on a slope rising to a ~6.5-6.8 km massif.
 
-  # Control points for checking the maths (not for mission analysis)
+  - id: nobile-rim-2
+    name: Nobile rim 2
+    tile: DM2
+    lat: -83.9540
+    lon: 58.82
+    elev: 1010
+
+  - id: malapert-massif
+    name: Malapert massif
+    tile: Site23
+    lat: -85.9948
+    lon: 359.76
+    elev: 4784
+    note: High massif with good Earth visibility, a historical relay candidate.
+
+  # --- real missions -------------------------------------------------------
+  - id: im2-athena
+    name: IM-2 Athena landing site
+    lat: -84.7906
+    lon: 29.1958
+    elev: 5322
+    note: |
+      Intuitive Machines IM-2 landing site (6 March 2025, CLPS). The lander came
+      down intact but on its side. Outside the 5 m tiles: 20 m DEM only.
+
+  # --- contrast: permanent shadow -----------------------------------------
+  - id: haworth
+    name: Haworth crater
+    tile: Haworth
+    lat: -86.7639
+    lon: 337.22
+    elev: 1628
+    note: Permanently shadowed crater; should show ~0% illumination.
+
+  - id: shoemaker
+    name: Shoemaker crater
+    tile: Shoemaker
+    lat: -87.1835
+    lon: 62.84
+    elev: 548
+    note: Permanently shadowed crater.
+
+  # --- control points for checking the maths ------------------------------
   - id: check-equator
     name: "CHECK: equator, 0E"
     lat: 0.0
@@ -66,5 +124,5 @@ sites:
     lon: 0.0
     elev: 0
     note: |
-      Sanity check: Sun elevation should stay within ~±1.6°
-      (lunar axial tilt), Earth near the horizon with ~±7° libration.
+      Sanity check — Sun elevation within ~±1.6° (lunar axial tilt),
+      Earth near the horizon with ~±7° libration.

@@ -48,3 +48,4 @@ def test_every_tile_maps_to_a_site_in_yaml():
     sites = load_sites()
     for tile in SITE_TILES:
         assert tile.site_id in sites, f"{tile.tile} -> {tile.site_id} not in sites.yaml"
+        assert sites[tile.site_id].tile == tile.tile
