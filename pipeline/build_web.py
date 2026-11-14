@@ -12,6 +12,7 @@ this holds only what needs 80 GB of terrain and SPICE:
     overlays/*.png           mean illumination and Earth visibility (Mazarico),
                              permanent shadow (Barker)
     closeups/<id>.jpg        10 x 10 km around a site: LROC NAC (SfS) or hillshade
+    globe/                   globe texture and normals (NASA CGI Moon Kit), polar "lens"
     reference.json           reference values for the TypeScript formulas
 
     python -m pipeline.build_web                 # everything
@@ -354,8 +355,60 @@ def build_reference() -> None:
 
 # --------------------------------------------------------------------------- #
 
+# --------------------------------------------------------------------------- #
+# globe (start screen)
+# --------------------------------------------------------------------------- #
+
+GLOBE_W, GLOBE_H = 2048, 1024
+LENS_CENTER = (-8_000.0, -3_000.0)  # polar "lens" centre: Connecting Ridge, Shackleton, de Gerlache
+LENS_HALF = 30_000.0
+LENS_PX = 480
+
+
+def build_globe() -> None:
+    """Globe texture and normal map (NASA CGI Moon Kit) + the polar "lens" image."""
+    from .datasets import MOONKIT
+
+    gdir = WEB_DATA / "globe"
+    gdir.mkdir(parents=True, exist_ok=True)
+    with rasterio.open(MOONKIT / "lroc_color_poles_2k.tif") as ds:
+        rgb = np.moveaxis(ds.read(out_shape=(3, GLOBE_H, GLOBE_W), resampling=Resampling.bilinear), 0, -1)
+    Image.fromarray(rgb.astype(np.uint8)).save(gdir / "moon_color.jpg", quality=86, optimize=True)
+
+    # tangent-space normals (R east, G north), relief exaggerated to read on the globe
+    with rasterio.open(MOONKIT / "ldem_4.tif") as ds:
+        dem = ds.read(1, out_shape=(GLOBE_H, GLOBE_W), resampling=Resampling.bilinear).astype(np.float64)
+    r_km = R_MOON_M / 1000
+    lat = np.radians(90 - (np.arange(GLOBE_H) + 0.5) * 180 / GLOBE_H)
+    dlon, dlat = 2 * np.pi / GLOBE_W, np.pi / GLOBE_H
+    gx = (np.roll(dem, -1, 1) - np.roll(dem, 1, 1)) / (2 * dlon * r_km * np.maximum(np.cos(lat), 0.02)[:, None])
+    gy = (np.roll(dem, 1, 0) - np.roll(dem, -1, 0)) / (2 * dlat * r_km)
+    gy[0], gy[-1] = gy[1], gy[-2]
+    k = 2.5
+    n = np.dstack([-gx * k, -gy * k, np.ones_like(gx)])
+    n /= np.linalg.norm(n, axis=2, keepdims=True)
+    Image.fromarray(np.clip((n + 1) * 127.5, 0, 255).astype(np.uint8)).save(gdir / "moon_normal.jpg", quality=90)
+
+    # "lens": 40 m terrain around the pole, toned for the UI
+    cx, cy = LENS_CENTER
+    bounds = (cx - LENS_HALF, cy - LENS_HALF, cx + LENS_HALF, cy + LENS_HALF)
+    with rasterio.open(DEM_REGIONAL / "LDEM_80S_40MPP_ADJ_HILL.TIF") as ds:
+        a = ds.read(1, window=from_bounds(*bounds, ds.transform), out_shape=(LENS_PX, LENS_PX),
+                    resampling=Resampling.bilinear).astype(np.float64)
+    g = np.clip((a - np.percentile(a, 1)) / (np.percentile(a, 99.5) - np.percentile(a, 1)), 0, 1) ** 1.2
+    dark, light = np.array([5, 11, 19.0]), np.array([188, 204, 214.0])
+    Image.fromarray((dark + (light - dark) * g[..., None]).astype(np.uint8)).save(gdir / "pole_lens.jpg", quality=86)
+    (gdir / "globe.json").write_text(json.dumps({
+        "color": "globe/moon_color.jpg", "normal": "globe/moon_normal.jpg",
+        "lens": {"file": "globe/pole_lens.jpg", "bounds": bounds},
+        "source": "NASA SVS CGI Moon Kit: LROC WAC color, LOLA LDEM; lens: LOLA 40 m hillshade",
+    }, indent=1), encoding="utf-8")
+    log(f"globe: texture {GLOBE_W}x{GLOBE_H}, normals, lens {LENS_PX}px")
+
+
 STEPS = {
     "ephem": build_ephem,
+    "globe": build_globe,
     "sites": build_sites,
     "tiles": build_tiles,
     "overlays": build_overlays,

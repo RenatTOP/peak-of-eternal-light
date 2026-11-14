@@ -30,6 +30,8 @@ DEM_SITES = DATA / "dem" / "sites"
 DEM_REGIONAL = DATA / "dem" / "regional"
 MAPS_PSR = DATA / "maps" / "psr"
 MAPS_ILLUM = DATA / "maps" / "illumination"
+MOONKIT = DATA / "moonkit"
+MOONKIT_URL = "https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720"
 
 PGDA = "https://pgda.gsfc.nasa.gov/data"
 
@@ -181,8 +183,19 @@ def clone_items(tiles: list[str] | None = None, n: int = N_CLONES) -> list[Item]
     return items
 
 
+def _globe() -> list[Item]:
+    """NASA CGI Moon Kit (SVS 4720): the globe in the web app."""
+    return [
+        Item(f"{MOONKIT_URL}/lroc_color_poles_2k.tif", MOONKIT / "lroc_color_poles_2k.tif", 3.3, "globe",
+             "LROC WAC colour mosaic 2048x1024 with polar mosaics, globe texture"),
+        Item(f"{MOONKIT_URL}/ldem_4.tif", MOONKIT / "ldem_4.tif", 4.2, "globe",
+             "LOLA terrain 4 px/°, globe normal map"),
+    ]
+
+
 GROUPS = {
     "kernels": _kernels,
+    "globe": _globe,
     "validation": _validation,
     "sites": _sites,
     "regional": _regional,
@@ -190,7 +203,7 @@ GROUPS = {
 }
 
 # Order matters: small and critical first, clones last.
-DEFAULT_ORDER = ("kernels", "validation", "sites", "regional", "clones")
+DEFAULT_ORDER = ("kernels", "globe", "validation", "sites", "regional", "clones")
 
 
 def items_for(groups: list[str]) -> list[Item]:
