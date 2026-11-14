@@ -47,7 +47,7 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .clock-date { font-size: 12px; color: var(--muted); }
 .clock-time { font-size: 26px; letter-spacing: 0.02em; }
 
-.explore { display: grid; grid-template-columns: 340px minmax(0, 1fr) 340px; grid-template-rows: minmax(0, 1fr) auto;
+.explore { display: grid; grid-template-columns: 340px minmax(0, 1fr) clamp(380px, 30vw, 480px); grid-template-rows: minmax(0, 1fr) auto;
            gap: var(--gap); padding: var(--gap) 24px; min-height: 0; }
 .bottom { grid-column: 1 / -1; }
 
@@ -107,7 +107,7 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .sub-title { font-size: 13px; font-weight: 600; margin-top: 12px; }
 .sub-note { font-size: 12px; color: var(--muted); margin-top: 2px; }
 .chart { display: block; width: 100%; }
-.skyline { height: 150px; margin-top: 8px; }
+.skyline { width: 100%; aspect-ratio: 5 / 2; min-height: 150px; max-height: 190px; margin-top: 8px; }
 .sky { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; font: 12px var(--mono); }
 .sky div { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; box-sizing: border-box; }
@@ -269,10 +269,13 @@ button.crow.on { background: rgba(255, 181, 71, 0.08); border-left-color: var(--
 
 /* ---------------------------------------------------------------- responsive */
 @media (max-width: 1360px) {
-  .explore { grid-template-columns: 300px minmax(0, 1fr) 300px; }
+  .explore { grid-template-columns: 300px minmax(0, 1fr) 380px; }
   .timebar { grid-template-columns: 360px minmax(0, 1fr); }
   .presets button { padding: 0 7px; }
   .brand-sub { display: none; }
+}
+@media (max-width: 1180px) {
+  .explore { grid-template-columns: 280px minmax(0, 1fr) 340px; }
 }
 
 @media (max-width: 960px) {
