@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import csv
 import sys
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -103,11 +104,10 @@ def load_sites(path: Path = SITES_PATH) -> dict[str, Site]:
 
 
 def site_vector(site: Site) -> np.ndarray:
-    """Position vector of a point in MOON_ME, km."""
+    """Position vector of a point in MOON_ME, km (same as spice.latrec, without SPICE)."""
     radius = R_MOON_KM + site.elev / 1000.0
-    return np.asarray(
-        spice.latrec(radius, np.radians(site.lon), np.radians(site.lat))
-    )
+    lat, lon = np.radians(site.lat), np.radians(site.lon)
+    return radius * np.array([np.cos(lat) * np.cos(lon), np.cos(lat) * np.sin(lon), np.sin(lat)])
 
 
 def enu_basis(site_vec: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -131,6 +131,19 @@ def enu_basis(site_vec: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]
 
 
 _BODY_CACHE: dict[tuple, np.ndarray] = {}
+_RADIUS_CACHE: dict[str, float] = {}
+
+# CSPICE is not thread-safe: concurrent calls from several threads crash the process.
+# All SPICE calls from code that may run in threads go through this lock with a cache;
+# the threads themselves only do numpy.
+SPICE_LOCK = threading.RLock()
+
+
+def body_radius_km(body: str) -> float:
+    with SPICE_LOCK:
+        if body not in _RADIUS_CACHE:
+            _RADIUS_CACHE[body] = float(np.mean(spice.bodvrd(body, "RADII", 3)[1]))
+        return _RADIUS_CACHE[body]
 
 
 def body_positions(body: str, ets: np.ndarray) -> np.ndarray:
@@ -142,12 +155,13 @@ def body_positions(body: str, ets: np.ndarray) -> np.ndarray:
     instead of the centre) is microarcseconds, see tests/test_ephem.py.
     """
     key = (body, float(ets[0]), float(ets[-1]), len(ets))
-    if key not in _BODY_CACHE:
-        if len(_BODY_CACHE) > 16:
-            _BODY_CACHE.clear()
-        pos, _lt = spice.spkpos(body, np.asarray(ets, dtype=float), FRAME, ABCORR, CENTER)
-        _BODY_CACHE[key] = np.asarray(pos, dtype=float).reshape(-1, 3)
-    return _BODY_CACHE[key]
+    with SPICE_LOCK:
+        if key not in _BODY_CACHE:
+            if len(_BODY_CACHE) > 16:
+                _BODY_CACHE.clear()
+            pos, _lt = spice.spkpos(body, np.asarray(ets, dtype=float), FRAME, ABCORR, CENTER)
+            _BODY_CACHE[key] = np.asarray(pos, dtype=float).reshape(-1, 3)
+        return _BODY_CACHE[key]
 
 
 def _track(body: str, ets: np.ndarray, vec: np.ndarray, site_vec: np.ndarray) -> Track:
@@ -156,8 +170,7 @@ def _track(body: str, ets: np.ndarray, vec: np.ndarray, site_vec: np.ndarray) ->
     unit = vec / dist[:, None]
     alt = np.degrees(np.arcsin(np.clip(unit @ up, -1.0, 1.0)))
     az = np.degrees(np.arctan2(unit @ east, unit @ north)) % 360.0
-    body_radius_km = float(np.mean(spice.bodvrd(body, "RADII", 3)[1]))
-    ang_radius = np.degrees(np.arcsin(np.clip(body_radius_km / dist, -1.0, 1.0)))
+    ang_radius = np.degrees(np.arcsin(np.clip(body_radius_km(body) / dist, -1.0, 1.0)))
     return Track(body=body, et=ets, alt=alt, az=az, distance=dist, ang_radius=ang_radius)
 
 

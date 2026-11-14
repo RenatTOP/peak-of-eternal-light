@@ -135,6 +135,28 @@ def test_fast_observe_matches_spkcpo(body):
     assert np.abs(daz).max() < 1e-3
 
 
+def test_site_vector_equals_spice_latrec():
+    for lat, lon, elev in [(-89.46, 222.5, 1945.0), (-85.43, 31.74, 6399.0), (10.0, -30.0, 0.0)]:
+        site = Site("s", "s", lat, lon, elev)
+        ref = spice.latrec(R_MOON_KM + elev / 1000, np.radians(lon), np.radians(lat))
+        assert np.allclose(site_vector(site), ref, atol=1e-9)
+
+
+def test_observe_is_safe_from_threads():
+    """CSPICE is not thread-safe; observe() from many threads must not crash the process."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    ets = ets_for("2027-01-01", days=30, step_min=60)
+    sites = [Site(f"s{i}", "s", -85.0 - i * 0.3, 20.0 * i, 0.0) for i in range(16)]
+
+    def one(site):
+        return observe(site, ets, "SUN").alt.mean() + observe(site, ets, "EARTH").alt.mean()
+
+    with ThreadPoolExecutor(16) as pool:
+        results = list(pool.map(one, sites))
+    assert all(np.isfinite(results))
+
+
 def test_runs_and_longest_run():
     mask = np.array([0, 1, 1, 0, 1, 1, 1, 0, 0, 1], dtype=bool)
     starts, lengths = runs(mask)
