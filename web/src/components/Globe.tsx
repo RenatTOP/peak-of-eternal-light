@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 
-import { DATA_URL, type AppData } from "../lib/data";
+import { DATA_URL, type AppData, type GlobeCap } from "../lib/data";
 import { T, sunAlpha } from "../lib/theme";
 
 type Vec3 = [number, number, number];
@@ -26,6 +26,68 @@ function unit(lat: number, lon: number): Vec3 {
   const la = (lat * Math.PI) / 180;
   const lo = (lon * Math.PI) / 180;
   return [Math.cos(la) * Math.cos(lo), Math.cos(la) * Math.sin(lo), Math.sin(la)];
+}
+
+const R_MOON_M = 1737400;
+const D2R = Math.PI / 180;
+
+// Main sphere with the equirectangular texture, cut short at the poles; theta from the north pole.
+// UVs recomputed because SphereGeometry stretches the texture over the cut range.
+function trimmedSphere(thetaStart: number, thetaEnd: number): THREE.SphereGeometry {
+  const rows = Math.ceil(((thetaEnd - thetaStart) / Math.PI) * 180);
+  const g = new THREE.SphereGeometry(1, 256, rows, 0, Math.PI * 2, thetaStart, thetaEnd - thetaStart);
+  const uv = g.attributes.uv as THREE.BufferAttribute;
+  for (let i = 0; i < uv.count; i++) {
+    const theta = thetaStart + (1 - uv.getY(i)) * (thetaEnd - thetaStart);
+    uv.setY(i, 1 - theta / Math.PI);
+  }
+  return g;
+}
+
+// Polar cap: a disc in stereographic projection (like the map), UVs linear in map x, y,
+// so no pinching or radial streaks at the pole. The edge fades into the sphere.
+function capGeometry(cap: GlobeCap, fadeDeg: number): THREE.BufferGeometry {
+  const RINGS = 72;
+  const SEG = 256;
+  const pos: number[] = [];
+  const uv: number[] = [];
+  const col: number[] = [];
+  for (let i = 0; i <= RINGS; i++) {
+    const rho = (cap.rho_max_m * i) / RINGS;
+    const colat = 2 * Math.atan(rho / (2 * R_MOON_M));
+    const alpha = Math.min(1, Math.max(0, (cap.colat_deg - colat / D2R) / fadeDeg));
+    for (let j = 0; j <= SEG; j++) {
+      const lon = (2 * Math.PI * j) / SEG;
+      const x = rho * Math.sin(lon);
+      const y = -cap.sign * rho * Math.cos(lon);
+      const me: Vec3 = [Math.sin(colat) * Math.cos(lon), Math.sin(colat) * Math.sin(lon), cap.sign * Math.cos(colat)];
+      const p = toThree(me);
+      pos.push(p.x, p.y, p.z);
+      uv.push((x / cap.rho_max_m + 1) / 2, (y / cap.rho_max_m + 1) / 2);
+      col.push(1, 1, 1, alpha);
+    }
+  }
+  const at = (i: number, j: number) => i * (SEG + 1) + j;
+  // counter-clockwise triangles seen from outside
+  const p0 = new THREE.Vector3().fromArray(pos, at(1, 0) * 3);
+  const p1 = new THREE.Vector3().fromArray(pos, at(2, 0) * 3);
+  const p2 = new THREE.Vector3().fromArray(pos, at(2, 1) * 3);
+  const outward = new THREE.Vector3().subVectors(p1, p0).cross(new THREE.Vector3().subVectors(p2, p0)).dot(p0) > 0;
+  const idx: number[] = [];
+  for (let i = 0; i < RINGS; i++) {
+    for (let j = 0; j < SEG; j++) {
+      const [a, b, c, d] = [at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j + 1)];
+      if (outward) idx.push(a, b, c, a, c, d);
+      else idx.push(a, c, b, a, d, c);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute("normal", new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+  g.setAttribute("color", new THREE.Float32BufferAttribute(col, 4));
+  g.setIndex(idx);
+  return g;
 }
 
 const VIEW_LAT = -70; // view from below the pole, slightly towards Earth
@@ -75,16 +137,33 @@ export function Globe({ data, selectedId, sunPctById, sunDir, earthDir, onPick, 
     camera.position.set(0, 0, DIST0);
 
     const loader = new THREE.TextureLoader();
-    const color = loader.load(DATA_URL(data.globe.color), () => render());
-    color.colorSpace = THREE.SRGBColorSpace;
-    color.anisotropy = 8;
-    const normal = loader.load(DATA_URL(data.globe.normal), () => render());
+    const aniso = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+    const tex = (file: string, srgb: boolean) => {
+      const t = loader.load(DATA_URL(file), () => render());
+      if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+      t.anisotropy = aniso;
+      return t;
+    };
+    const { caps, cap_fade_deg: fade = 2 } = data.globe;
     const mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(1, 192, 144),
-      new THREE.MeshStandardMaterial({ map: color, normalMap: normal, roughness: 1, metalness: 0 }),
+      caps
+        ? trimmedSphere((caps.north.colat_deg - fade) * D2R, Math.PI - (caps.south.colat_deg - fade) * D2R)
+        : new THREE.SphereGeometry(1, 256, 180),
+      new THREE.MeshStandardMaterial({
+        map: tex(data.globe.color, true), normalMap: tex(data.globe.normal, false), roughness: 1, metalness: 0,
+      }),
     );
     const moon = new THREE.Group();
     moon.add(mesh);
+    for (const cap of caps ? [caps.south, caps.north] : []) {
+      const m = new THREE.Mesh(capGeometry(cap, fade), new THREE.MeshStandardMaterial({
+        map: tex(cap.color, true), normalMap: tex(cap.normal, false), roughness: 1, metalness: 0,
+        vertexColors: true, transparent: true,
+        polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2, // above the sphere at the seam
+      }));
+      m.renderOrder = 1;
+      moon.add(m);
+    }
     scene.add(moon);
     const light = new THREE.DirectionalLight(0xffffff, 3.4);
     scene.add(light, new THREE.AmbientLight(0x9ec3dc, 0.05));
@@ -108,6 +187,9 @@ export function Globe({ data, selectedId, sunPctById, sunDir, earthDir, onPick, 
       const h = box.clientHeight;
       if (!w || !h) return;
       light.position.copy(toThree(dirs.current.sun)).applyQuaternion(moon.quaternion).multiplyScalar(10);
+      // markers keep a constant screen size, not kilometres
+      const zk = Math.min(1, (camera.position.z - 1) / (DIST0 - 1));
+      for (const m of markers.values()) m.scale.setScalar((m.userData.size as number ?? 0.0065) * zk);
       renderer.render(scene, camera);
       // overlay: disc radius on screen, Sun and Earth directions, where the pole is
       const d = camera.position.z;
@@ -142,6 +224,7 @@ export function Globe({ data, selectedId, sunPctById, sunDir, earthDir, onPick, 
     const ro = new ResizeObserver(resize);
     ro.observe(box);
     gl.current = { renderer, scene, camera, moon, mesh, light, markers, render };
+    if (import.meta.env.DEV) Object.assign(window, { __globe: { ...gl.current, THREE, toThree, unit } });
     resize();
     return () => {
       ro.disconnect();
@@ -161,7 +244,7 @@ export function Globe({ data, selectedId, sunPctById, sunDir, earthDir, onPick, 
       mat.color.set(s.group === "mission" ? T.earth : s.group === "psr" ? T.psr : T.sun);
       mat.opacity = s.group === "candidate" ? sunAlpha(sunPctById[s.id] ?? 50) : 1;
       mat.transparent = mat.opacity < 1;
-      m.scale.setScalar(sel ? 0.012 : 0.0065);
+      m.userData.size = sel ? 0.012 : 0.0065;
     }
     g.render();
   }, [data, selectedId, sunPctById]);
@@ -226,9 +309,10 @@ export function Globe({ data, selectedId, sunPctById, sunDir, earthDir, onPick, 
         const ndc = new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
         const ray = new THREE.Raycaster();
         ray.setFromCamera(ndc, g.camera);
-        const hit = ray.intersectObject(g.mesh)[0];
+        // the Moon is a unit sphere at the scene centre; intersect it exactly, not via the mesh
+        const hit = ray.ray.intersectSphere(new THREE.Sphere(new THREE.Vector3(), 1), new THREE.Vector3());
         if (hit) {
-          const p = fromThree(g.moon.worldToLocal(hit.point.clone()).normalize());
+          const p = fromThree(g.moon.worldToLocal(hit).normalize());
           const lat = (Math.asin(p[2]) * 180) / Math.PI;
           const lon = (((Math.atan2(p[1], p[0]) * 180) / Math.PI) + 360) % 360;
           handlers.current.onPick(lat, lon);

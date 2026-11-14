@@ -35,9 +35,20 @@ export interface ImageLayer {
   source?: string;
 }
 
+// globe polar cap: textures in stereographic projection around the pole
+export interface GlobeCap {
+  color: string;
+  normal: string;
+  sign: 1 | -1; // 1 north, -1 south
+  colat_deg: number;
+  rho_max_m: number;
+}
+
 export interface GlobeMeta {
   color: string;
   normal: string;
+  caps?: { south: GlobeCap; north: GlobeCap };
+  cap_fade_deg?: number;
   lens: ImageLayer;
   source: string;
 }

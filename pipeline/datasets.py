@@ -186,10 +186,6 @@ def clone_items(tiles: list[str] | None = None, n: int = N_CLONES) -> list[Item]
 def _globe() -> list[Item]:
     """NASA CGI Moon Kit (SVS 4720): the globe in the web app."""
     return [
-        Item(f"{MOONKIT_URL}/lroc_color_poles_2k.tif", MOONKIT / "lroc_color_poles_2k.tif", 3.3, "globe",
-             "LROC WAC colour mosaic 2048x1024 with polar mosaics, globe texture"),
-        Item(f"{MOONKIT_URL}/ldem_4.tif", MOONKIT / "ldem_4.tif", 4.2, "globe",
-             "LOLA terrain 4 px/°, quick preview"),
         Item(f"{MOONKIT_URL}/lroc_color_poles_8k.tif", MOONKIT / "lroc_color_poles_8k.tif", 50.6, "globe",
              "LROC WAC colour mosaic 8192x4096, globe and polar cap texture"),
         Item(f"{MOONKIT_URL}/ldem_16.tif", MOONKIT / "ldem_16.tif", 66.4, "globe",

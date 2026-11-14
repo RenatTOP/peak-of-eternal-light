@@ -359,35 +359,112 @@ def build_reference() -> None:
 # globe (start screen)
 # --------------------------------------------------------------------------- #
 
-GLOBE_W, GLOBE_H = 2048, 1024
+GLOBE_W, GLOBE_H = 4096, 2048
 LENS_CENTER = (-8_000.0, -3_000.0)  # polar "lens" centre: Connecting Ridge, Shackleton, de Gerlache
 LENS_HALF = 30_000.0
 LENS_PX = 480
+# Polar caps: a conformal map (as in the rest of the app) instead of the cylindrical one,
+# which pinches the texture to a point at the pole. South from polar LOLA 240 m, north from global.
+CAPS = {
+    "south": {"sign": -1, "colat_deg": 20.0, "px": 4096, "k": 1.6},
+    "north": {"sign": 1, "colat_deg": 16.0, "px": 1024, "k": 2.5},
+}
+CAP_FADE_DEG = 3.0  # cap/sphere overlap; the seam fades out over it
+
+
+def _cap_lonlat(sign: int, rho_max: float, px: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Cap pixel centres (row 0 at top, +y): map x, y and lat/lon in degrees.
+    South: x = rho sin(lon), y = rho cos(lon); north: y = -rho cos(lon)."""
+    c = (np.arange(px) + 0.5) / px * 2 - 1
+    x = (c * rho_max)[None, :].repeat(px, 0)
+    y = (-c * rho_max)[:, None].repeat(px, 1)
+    colat = 2 * np.degrees(np.arctan(np.hypot(x, y) / (2 * R_MOON_M)))
+    lon = np.degrees(np.arctan2(x, -sign * y))
+    return x, y, sign * (90 - colat), lon
+
+
+def _sample_equirect(img: np.ndarray, lat: np.ndarray, lon: np.ndarray, order: int) -> np.ndarray:
+    """Equirectangular map values (row 0 = 90°, column 0 = -180°) at arbitrary points:
+    order 1 bilinear, 3 Catmull-Rom (smooth relief without steps between rows)."""
+    h, w = img.shape[:2]
+    rows = np.clip((90 - lat) / 180 * h - 0.5, 0, h - 1)
+    cols = (lon + 180) % 360 / 360 * w - 0.5
+    r0, c0 = np.floor(rows).astype(int), np.floor(cols).astype(int)
+    fr, fc = rows - r0, cols - c0
+    if order == 1:
+        taps, wr, wc = (0, 1), (1 - fr, fr), (1 - fc, fc)
+    else:
+        def cr(t):  # Catmull-Rom weights for nodes -1, 0, 1, 2
+            return (((-t + 2) * t - 1) * t / 2, ((3 * t - 5) * t * t + 2) / 2,
+                    ((-3 * t + 4) * t + 1) * t / 2, (t - 1) * t * t / 2)
+        taps, wr, wc = (-1, 0, 1, 2), cr(fr), cr(fc)
+    out = 0.0
+    for i, a in zip(taps, wr):
+        ri = np.clip(r0 + i, 0, h - 1)
+        for j, b in zip(taps, wc):
+            v = img[ri, (c0 + j) % w].astype(np.float32)  # longitude wraps
+            wgt = (a * b).astype(np.float32)
+            out = out + (v * wgt[..., None] if img.ndim == 3 else v * wgt)
+    return out
+
+
+def _normal_rgb(gx: np.ndarray, gy: np.ndarray, k: float) -> np.ndarray:
+    """Tangent-space normal map: R along u, G along v, B outwards."""
+    n = np.dstack([-gx * k, -gy * k, np.ones_like(gx)])
+    n /= np.linalg.norm(n, axis=2, keepdims=True)
+    return np.clip((n + 1) * 127.5, 0, 255).astype(np.uint8)
 
 
 def build_globe() -> None:
-    """Globe texture and normal map (NASA CGI Moon Kit) + the polar "lens" image."""
+    """Globe texture and normals (NASA CGI Moon Kit), polar caps and the polar "lens" image."""
     from .datasets import MOONKIT
 
     gdir = WEB_DATA / "globe"
     gdir.mkdir(parents=True, exist_ok=True)
-    with rasterio.open(MOONKIT / "lroc_color_poles_2k.tif") as ds:
-        rgb = np.moveaxis(ds.read(out_shape=(3, GLOBE_H, GLOBE_W), resampling=Resampling.bilinear), 0, -1)
-    Image.fromarray(rgb.astype(np.uint8)).save(gdir / "moon_color.jpg", quality=86, optimize=True)
+    with rasterio.open(MOONKIT / "lroc_color_poles_8k.tif") as ds:
+        color8k = np.moveaxis(ds.read(), 0, -1)
+        rgb = np.moveaxis(ds.read(out_shape=(3, GLOBE_H, GLOBE_W), resampling=Resampling.average), 0, -1)
+    Image.fromarray(rgb.astype(np.uint8)).save(gdir / "moon_color.jpg", quality=85, optimize=True)
 
-    # tangent-space normals (R east, G north), relief exaggerated to read on the globe
-    with rasterio.open(MOONKIT / "ldem_4.tif") as ds:
-        dem = ds.read(1, out_shape=(GLOBE_H, GLOBE_W), resampling=Resampling.bilinear).astype(np.float64)
+    # tangent-space normals (R east, G north), relief exaggerated to read on the globe.
+    # Near the poles 1/cos(lat) blows up noise; the sphere stops there and a cap takes over.
+    with rasterio.open(MOONKIT / "ldem_16.tif") as ds:
+        dem16 = ds.read(1).astype(np.float64)  # km
+        dem = ds.read(1, out_shape=(GLOBE_H, GLOBE_W), resampling=Resampling.average).astype(np.float64)
     r_km = R_MOON_M / 1000
     lat = np.radians(90 - (np.arange(GLOBE_H) + 0.5) * 180 / GLOBE_H)
     dlon, dlat = 2 * np.pi / GLOBE_W, np.pi / GLOBE_H
-    gx = (np.roll(dem, -1, 1) - np.roll(dem, 1, 1)) / (2 * dlon * r_km * np.maximum(np.cos(lat), 0.02)[:, None])
+    gx = (np.roll(dem, -1, 1) - np.roll(dem, 1, 1)) / (2 * dlon * r_km * np.maximum(np.cos(lat), 0.05)[:, None])
     gy = (np.roll(dem, 1, 0) - np.roll(dem, -1, 0)) / (2 * dlat * r_km)
     gy[0], gy[-1] = gy[1], gy[-2]
-    k = 2.5
-    n = np.dstack([-gx * k, -gy * k, np.ones_like(gx)])
-    n /= np.linalg.norm(n, axis=2, keepdims=True)
-    Image.fromarray(np.clip((n + 1) * 127.5, 0, 255).astype(np.uint8)).save(gdir / "moon_normal.jpg", quality=90)
+    Image.fromarray(_normal_rgb(gx, gy, 2.5)).save(gdir / "moon_normal.jpg", quality=88, optimize=True)
+
+    caps = {}
+    for name, cfg in CAPS.items():
+        sign, px, k = cfg["sign"], cfg["px"], cfg["k"]
+        rho_max = 2 * R_MOON_M * np.tan(np.radians(cfg["colat_deg"]) / 2)
+        x, y, clat, clon = _cap_lonlat(sign, rho_max, px)
+        cpx = min(px, 2048)  # colour mosaic is ~1.3 km/px; a bigger texture adds nothing
+        _, _, alat, alon = _cap_lonlat(sign, rho_max, cpx)
+        col = _sample_equirect(color8k, alat, alon, order=1)
+        Image.fromarray(np.clip(col, 0, 255).astype(np.uint8)).save(gdir / f"cap_{name}_color.jpg", quality=85, optimize=True)
+        if name == "south":
+            with rasterio.open(DEM_REGIONAL / "LDEM_60S_240MPP_ADJ.TIF") as ds:
+                z = ds.read(1, window=from_bounds(-rho_max, -rho_max, rho_max, rho_max, ds.transform),
+                            out_shape=(px, px), resampling=Resampling.average).astype(np.float64)
+            if np.isnan(z).any():  # holes in polar terrain filled from global
+                z = np.where(np.isnan(z), _sample_equirect(dem16, clat, clon, order=3) * 1000, z)
+        else:
+            z = _sample_equirect(dem16, clat, clon, order=3).astype(np.float64) * 1000
+        step = 2 * rho_max / px
+        # stereographic scale: 1 m on the map = 1/m m on the surface
+        m = 1 + (x * x + y * y) / (4 * R_MOON_M**2)
+        gx = np.gradient(z, axis=1) / step * m
+        gy = -np.gradient(z, axis=0) / step * m  # rows go down, v goes up
+        Image.fromarray(_normal_rgb(gx, gy, k)).save(gdir / f"cap_{name}_normal.jpg", quality=88, optimize=True)
+        caps[name] = {"color": f"globe/cap_{name}_color.jpg", "normal": f"globe/cap_{name}_normal.jpg",
+                      "sign": sign, "colat_deg": cfg["colat_deg"], "rho_max_m": rho_max}
+        log(f"globe: cap {name} {px}px, {step:.0f} m/px, to {90 - cfg['colat_deg']:.0f}°")
 
     # "lens": 40 m terrain around the pole, toned for the UI
     cx, cy = LENS_CENTER
@@ -400,10 +477,11 @@ def build_globe() -> None:
     Image.fromarray((dark + (light - dark) * g[..., None]).astype(np.uint8)).save(gdir / "pole_lens.jpg", quality=86)
     (gdir / "globe.json").write_text(json.dumps({
         "color": "globe/moon_color.jpg", "normal": "globe/moon_normal.jpg",
+        "caps": caps, "cap_fade_deg": CAP_FADE_DEG,
         "lens": {"file": "globe/pole_lens.jpg", "bounds": bounds},
-        "source": "NASA SVS CGI Moon Kit: LROC WAC color, LOLA LDEM; lens: LOLA 40 m hillshade",
+        "source": "NASA SVS CGI Moon Kit: LROC WAC color, LOLA LDEM 16 ppd; south cap: LOLA 240 m polar DEM; lens: LOLA 40 m hillshade",
     }, indent=1), encoding="utf-8")
-    log(f"globe: texture {GLOBE_W}x{GLOBE_H}, normals, lens {LENS_PX}px")
+    log(f"globe: texture {GLOBE_W}x{GLOBE_H}, normals, caps, lens {LENS_PX}px")
 
 
 STEPS = {

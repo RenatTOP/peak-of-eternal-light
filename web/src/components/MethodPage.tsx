@@ -31,7 +31,8 @@ export function MethodPage() {
             <li><b>Terrain</b>: LRO LOLA polar DEMs, 5 m at candidate sites, 20–240 m regional (Barker et al.).</li>
             <li><b>Near-site detail</b>: shape-from-shading 5 m terrain and LROC NAC mosaics of Artemis III regions (Bertone et al.).</li>
             <li><b>Reference maps</b>: average illumination, Earth visibility and permanent shadow (Mazarico et al., Barker et al.).</li>
-            <li><b>Globe</b>: NASA SVS CGI Moon Kit, LROC WAC colour and LOLA topography.</li>
+            <li><b>Globe</b>: NASA SVS CGI Moon Kit, LROC WAC colour and LOLA topography. The poles are drawn as
+              polar stereographic caps, the south one shaded from the 240 m LOLA polar DEM.</li>
           </ul>
           <p>Panels and antenna are assumed 2 m above the ground. Everything runs client-side; no server.</p>
         </Panel>
