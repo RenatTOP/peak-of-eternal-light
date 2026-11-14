@@ -42,6 +42,20 @@ interface Props {
   onCursor: (i: number) => void;
   departures: { t: number; v: Departure }[] | null; // start windows over the year; null = still computing
   onStart: (t: number) => void;
+  suggest: "idle" | "busy" | "failed";
+  onSuggest: () => void;
+  original: RouteStats | null; // route before the sunnier path, for comparison
+  current: RouteStats | null;
+  onRestore: () => void;
+}
+
+/** Route summary for the before / after comparison. */
+export interface RouteStats {
+  lengthM: number;
+  arriveH: number | null; // null = didn't arrive within the period
+  emptyOnWay: boolean; // battery ran out before arrival
+  sunPct: number; // how much Sun the rover saw over the period
+  goodDays: number | null; // start days in the year when it arrives and the battery lasts the period
 }
 
 const km = (m: number) => `${(m / 1000).toFixed(m < 10_000 ? 1 : 0)} km`;
@@ -76,9 +90,8 @@ export function TraverseCard(p: Props) {
             <button className="btn" onClick={p.onExample}>Try an example route</button>
           </div>
           <p className="pw-note">
-            Example: Shackleton rim → Connecting Ridge, 12 km, following the high ground (the shortest path over the
-            LOLA terrain that avoids low, shadowed ground and slopes over 12°). A hypothetical route for illustration; no
-            published rover plan exists for it.
+            Example: Shackleton rim → Connecting Ridge in a straight line, 11 km, starting 8 January 2027. Then try
+            “Suggest a sunnier path”. A hypothetical route for illustration; no published rover plan exists for it.
           </p>
         </div>
       )}
@@ -119,6 +132,20 @@ export function TraverseCard(p: Props) {
       {s.status === "ok" && (
         <>
           <Arrival run={s.run} start={p.periodStart} periodDays={p.periodDays} mode={p.cfg.mode} />
+          {p.original && p.current ? (
+            <Compare a={p.original} b={p.current} year={new Date(p.periodStart).getUTCFullYear()} onRestore={p.onRestore} />
+          ) : (
+            <div className="trav-suggest">
+              <button className="btn primary" disabled={p.suggest === "busy"} onClick={p.onSuggest}>
+                {p.suggest === "busy" ? "Searching the terrain…" : p.cfg.mode === "batteryEarth" ? "Suggest a sunnier, Earth-facing path" : "Suggest a sunnier path"}
+              </button>
+              <p className="pw-note">
+                {p.suggest === "failed"
+                  ? "Could not load the sunlight maps. Check the connection and try again."
+                  : `Reroutes each leg over ground that NASA’s 18.6-year maps show as better lit${p.cfg.mode === "batteryEarth" ? " and facing Earth" : ""}, avoiding slopes over 15°. Your waypoints stay.`}
+              </p>
+            </div>
+          )}
           <div style={{ marginTop: 12 }}>
             <Head label="WHEN TO START" right={`each day of ${new Date(p.periodStart).getUTCFullYear()}, ${Math.round(Math.min(p.periodDays, 60))}-day window`} />
           </div>
@@ -147,6 +174,34 @@ export function TraverseCard(p: Props) {
         <button className="btn" onClick={p.onClear}>{s.status === "drawing" ? "Close" : "Clear route"}</button>
       </div>
     </Panel>
+  );
+}
+
+function Compare({ a, b, year, onRestore }: { a: RouteStats; b: RouteStats; year: number; onRestore: () => void }) {
+  const arr = (s: RouteStats) => (s.emptyOnWay ? "battery dies" : s.arriveH === null ? "not in time" : fmtDuration(s.arriveH));
+  const rows: [string, string, string, boolean][] = [
+    ["Length", km(a.lengthM), km(b.lengthM), b.lengthM <= a.lengthM],
+    ["Arrives in", arr(a), arr(b), !b.emptyOnWay && b.arriveH !== null && (a.emptyOnWay || a.arriveH === null || b.arriveH <= a.arriveH)],
+    ["Sun on the way", `${a.sunPct.toFixed(0)}%`, `${b.sunPct.toFixed(0)}%`, b.sunPct >= a.sunPct],
+  ];
+  if (a.goodDays !== null && b.goodDays !== null) {
+    rows.push([`Good start days, ${year}`, `${a.goodDays}`, `${b.goodDays}`, b.goodDays >= a.goodDays]);
+  }
+  return (
+    <div className="trav-compare">
+      <Head label="SUNNIER PATH" right="your route → suggested" />
+      <div className="trav-cmp">
+        {rows.map(([k, x, y, better]) => (
+          <div key={k}>
+            <span>{k}</span>
+            <b className="muted" style={x === "battery dies" ? { color: T.empty } : undefined}>{x}</b>
+            <i>→</i>
+            <b style={{ color: y === "battery dies" ? T.empty : better ? T.text : T.muted }}>{y}</b>
+          </div>
+        ))}
+      </div>
+      <button className="btn" onClick={onRestore}>Back to my route</button>
+    </div>
   );
 }
 

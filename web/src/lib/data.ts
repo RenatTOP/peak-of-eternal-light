@@ -1,4 +1,5 @@
 import { AnyPoint, httpLoader } from "./anypoint";
+import { VisMap } from "./vismap";
 import { Ephem, Horizon, type EphemMeta } from "./astro";
 
 export type SiteGroup = "candidate" | "mission" | "psr";
@@ -169,3 +170,11 @@ export function loadClones(data: AppData, siteId: string): Promise<Horizon[] | n
 }
 
 export const DATA_URL = (file: string) => BASE + file;
+
+let visP: Promise<VisMap | null> | null = null;
+
+/** Numeric illumination maps for path finding, only when needed. */
+export function loadVisMap(): Promise<VisMap | null> {
+  visP ??= VisMap.load(httpLoader(BASE)).catch(() => null);
+  return visP;
+}

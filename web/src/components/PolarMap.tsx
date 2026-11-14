@@ -42,6 +42,7 @@ export interface MapRoute {
   path?: { x: number; y: number; state: "lit" | "dark" | "ahead" }[]; // path points: how the rover drove them
   rover?: { x: number; y: number } | null;
   fitKey?: number; // change -> the map fits the whole route
+  anchors?: [number, number][]; // user-placed waypoints (the rest come from path finding, no markers)
 }
 
 /** Leaflet in polar stereographic metres: LatLng = (y, x). */
@@ -239,7 +240,7 @@ export function PolarMap(props: Props) {
     } else {
       line(r.way, { color: T.text, weight: 2, dashArray: "6 5" });
     }
-    r.way.forEach(([x, y], i) => {
+    (r.anchors ?? r.way).forEach(([x, y], i) => {
       L.marker(ll(x, y), {
         interactive: false,
         icon: L.divIcon({ className: "", iconSize: [12, 12], iconAnchor: [6, 6],
@@ -247,7 +248,7 @@ export function PolarMap(props: Props) {
       }).addTo(g);
     });
     return () => { g.remove(); };
-  }, [props.route?.way, props.route?.path, props.route?.drawing]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [props.route?.way, props.route?.path, props.route?.drawing, props.route?.anchors]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // fit the whole route (e.g. an example was opened)
   useEffect(() => {

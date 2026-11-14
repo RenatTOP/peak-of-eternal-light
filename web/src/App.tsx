@@ -9,10 +9,11 @@ import { PowerCard } from "./components/PowerCard";
 import { PolarMap, type MapRoute, type OverlayKey, type RouteAction } from "./components/PolarMap";
 import { ResultPanel } from "./components/ResultPanel";
 import { SiteCard, type ListRow } from "./components/SiteCard";
-import { passState, TraverseCard, type TraverseState } from "./components/TraverseCard";
+import { passState, TraverseCard, type RouteStats, type TraverseState } from "./components/TraverseCard";
+import { PATH_DEFAULTS, sunnierPath } from "./lib/pathfind";
 import type { PointHorizon } from "./lib/anypoint";
 import { analyze, computeSeries, computeTrack, latLonToXY, xyToLatLon, type Analysis, type Horizon, type Observer } from "./lib/astro";
-import { loadAppData, loadClones, type AppData, type LoadStep, type Mission, type SiteInfo } from "./lib/data";
+import { loadAppData, loadClones, loadVisMap, type AppData, type LoadStep, type Mission, type SiteInfo } from "./lib/data";
 import { batteryNeeded, generation, POWER_PRESETS, simulate, type PowerConfig } from "./lib/power";
 import { terrainSpread } from "./lib/spread";
 import { autoStepMs, DAY_MS, fmtLat, fmtLon, HOUR_MS } from "./lib/format";
@@ -43,13 +44,10 @@ function savedPower(): PowerConfig {
   return POWER_PRESETS[0].cfg;
 }
 
-// example route: Shackleton rim -> Connecting Ridge, ~12 km. Vertices: the shortest path over 80 m LOLA terrain
-// avoiding lowlands (shadow) and slopes over 12°, simplified to 7 points. Hypothetical: no published
-// rover traverses exist here. Start 8 January 2027, one of the days the rover arrives and lasts the month.
-const EXAMPLE_ROUTE: XY[] = [
-  [-89.7823, 204.6236], [-89.7105, 199.9831], [-89.6677, 203.3852], [-89.6421, 208.9264],
-  [-89.5724, 213.9965], [-89.5153, 221.5526], [-89.4399, 222.6141],
-].map(([la, lo]) => latLonToXY(la, lo));
+// example route: Shackleton rim -> Connecting Ridge in a straight line, 11 km. Hypothetical: no rover
+// traverses are published here. On 8 January 2027 the straight line dips into a dark saddle and the battery
+// dies on the way, while the sunnier path the same day arrives and lasts the month: why the button exists.
+const EXAMPLE_ROUTE: XY[] = [[-89.78, 203.8], [-89.439, 222.9]].map(([la, lo]) => latLonToXY(la, lo));
 const EXAMPLE_START = Date.UTC(2027, 0, 8);
 
 interface RouteDraft {
@@ -57,6 +55,7 @@ interface RouteDraft {
   drawing: boolean;
   prev: XY[] | null; // route before editing, for Cancel
   example: boolean;
+  original: { way: XY[]; stats: RouteStats } | null; // before the sunnier path
 }
 
 interface Trace {
@@ -118,6 +117,9 @@ export default function App() {
   const [globeFocus, setGlobeFocus] = useState<{ lat: number; lon: number; key: number } | null>(null);
   const [route, setRoute] = useState<RouteDraft | null>(null);
   const [routeFit, setRouteFit] = useState(0);
+  const [suggest, setSuggest] = useState<"idle" | "busy" | "failed">("idle");
+  // horizons of the last few routes, so "Back to my route" doesn't retrace
+  const rhCache = useRef(new Map<XY[], RouteHorizons>());
   const [trace, setTrace] = useState<Trace | null>(null);
   const traceRef = useRef(trace);
   traceRef.current = trace;
@@ -148,6 +150,11 @@ export default function App() {
     if (!ap || !routeWay) return;
     const t = traceRef.current;
     if (t?.way === routeWay && (t.rh || t.outside)) return; // already computed (e.g. Cancel after Edit)
+    const cached = rhCache.current.get(routeWay);
+    if (cached) {
+      setTrace({ way: routeWay, done: cached.pts.length, total: cached.pts.length, rh: cached, outside: false });
+      return;
+    }
     if (routeWay.some(([x, y]) => xyToLatLon(x, y)[0] > -60)) {
       setTrace({ way: routeWay, done: 0, total: 0, rh: null, outside: true });
       return;
@@ -156,7 +163,14 @@ export default function App() {
     let alive = true;
     setTrace({ way: routeWay, done: 0, total: pts.length, rh: null, outside: false });
     routeHorizons(ap, pts, (done) => alive && setTrace((c) => (c?.way === routeWay ? { ...c, done } : c)), () => alive)
-      .then((rh) => alive && setTrace({ way: routeWay, done: pts.length, total: pts.length, rh, outside: !rh }))
+      .then((rh) => {
+        if (!alive) return;
+        if (rh) {
+          rhCache.current.set(routeWay, rh);
+          if (rhCache.current.size > 4) rhCache.current.delete(rhCache.current.keys().next().value!);
+        }
+        setTrace({ way: routeWay, done: pts.length, total: pts.length, rh, outside: !rh });
+      })
       .catch(() => alive && setTrace({ way: routeWay, done: 0, total: 0, rh: null, outside: true }));
     return () => { alive = false; };
   }, [data, routeWay]);
@@ -275,7 +289,8 @@ export default function App() {
   const mapRouteBase = useMemo((): MapRoute | null => {
     if (!route) return null;
     const path = trav ? passState(trav.rh, trav.run).map((state, k) => ({ x: trav.rh.pts[k].x, y: trav.rh.pts[k].y, state })) : undefined;
-    return { way: route.way, drawing: route.drawing, lengthKm: routeLength(route.way) / 1000, path };
+    return { way: route.way, drawing: route.drawing, lengthKm: routeLength(route.way) / 1000, path,
+             anchors: route.original && !route.drawing ? route.original.way : undefined };
   }, [route, trav]);
 
   // --- actions
@@ -333,7 +348,7 @@ export default function App() {
     setStage("map");
     // default craft is a lander; routes use the rover unless the user changed the settings
     if (JSON.stringify(power) === JSON.stringify(POWER_PRESETS[0].cfg)) setPower(POWER_PRESETS.find((p) => p.id === "rover")!.cfg);
-    setRoute({ way, drawing: way.length < 2, prev: null, example });
+    setRoute({ way, drawing: way.length < 2, prev: null, example, original: null });
     if (way.length >= 2 && !example) fitPeriod();
   };
   const onRoute = (a: RouteAction) => {
@@ -350,10 +365,40 @@ export default function App() {
     } else if (route && route.way.length >= 2) {
       // the example stays an example only while unchanged
       const same = !!route.prev && route.prev.length === route.way.length && route.prev.every((p, i) => p === route.way[i]);
-      setRoute({ ...route, way: same ? route.prev! : route.way, drawing: false, prev: null, example: route.example && same });
+      setRoute({ ...route, way: same ? route.prev! : route.way, drawing: false, prev: null, example: route.example && same,
+                 original: same ? route.original : null });
       fitPeriod();
     }
   };
+  const statsNow = (): RouteStats | null => {
+    if (!trav) return null;
+    const r = trav.run;
+    const fe = r.power.firstEmpty;
+    return {
+      lengthM: r.length, arriveH: r.arrive === null ? null : (r.arrive - start) / 3.6e6,
+      emptyOnWay: fe !== null && (r.arrive === null || fe < r.arrive), sunPct: trav.analysis.metrics.sunMeanPct,
+      goodDays: departures?.key === depKey ? departures.days.filter((d) => d.v === "survives").length : null,
+    };
+  };
+  // sunnier path: reroute each leg over lit ground, keeping the waypoints
+  const suggestPath = async () => {
+    const ap = data?.anyPoint;
+    const stats = statsNow();
+    if (!ap || !route || !stats) return;
+    setSuggest("busy");
+    setPlaying(false);
+    const vis = await loadVisMap();
+    if (!vis) {
+      setSuggest("failed");
+      return;
+    }
+    const res = await sunnierPath(route.way, vis, ap.terrain,
+                                  { ...PATH_DEFAULTS, earthWeight: travCfg.mode === "batteryEarth" ? 6 : 0 });
+    setSuggest("idle");
+    setRoute((r) => r && r.way === route.way
+      ? { ...r, way: res.way, drawing: false, prev: null, original: { way: r.way, stats } } : r);
+  };
+  const restoreRoute = () => setRoute((r) => r?.original ? { ...r, way: r.original.way, original: null } : r);
   const showMissionOnGlobe = (m: Mission) => {
     if (m.where.lat === undefined || m.where.lon === undefined) return;
     setGlobeFocus({ lat: m.where.lat, lon: m.where.lon, key: Date.now() });
@@ -384,13 +429,15 @@ export default function App() {
     : { status: "tracing", done: trace?.way === route.way ? trace.done : 0, total: trace?.way === route.way ? trace.total : 0 };
   if (route && travState) {
     left = (
-      <TraverseCard state={travState} example={route.example} waypoints={route.way.length} lengthM={routeLength(route.way)}
+      <TraverseCard state={travState} example={route.example} waypoints={route.original && !route.drawing ? route.original.way.length : route.way.length} lengthM={routeLength(route.way)}
                     startLatLon={route.way.length ? xyToLatLon(route.way[0][0], route.way[0][1]) : null}
                     cfg={travCfg} onCfg={setTravCfg} periodDays={days} periodStart={start} power={trav ? powerCard : null}
                     onEdit={() => setRoute({ ...route, drawing: true, prev: route.way })} onClear={() => setRoute(null)}
                     onExample={() => startRoute(EXAMPLE_ROUTE, true)}
                     onCursor={(i) => { setPlaying(false); setCursor(i); }}
-                    departures={departures?.key === depKey ? departures.days : null} onStart={(t) => { setPlaying(false); setStart(t); }} />
+                    departures={departures?.key === depKey ? departures.days : null} onStart={(t) => { setPlaying(false); setStart(t); }}
+                    suggest={suggest} onSuggest={suggestPath} original={route.original?.stats ?? null} current={statsNow()}
+                    onRestore={restoreRoute} />
     );
   } else if (view && m) {
     if (view.what === "point" && picked?.point) {
