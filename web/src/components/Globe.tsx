@@ -5,6 +5,7 @@ import * as THREE from "three";
 
 import { DATA_URL, type AppData, type GlobeCap } from "../lib/data";
 import { T, sunAlpha } from "../lib/theme";
+import { Brackets } from "./hud";
 
 type Vec3 = [number, number, number];
 
@@ -437,18 +438,38 @@ function GlobeOverlay({ ov, data, selectedId, onZoomPole }: {
   const [sx, sy] = at(ov.sunA, r1);
   const [ex, ey] = at(ov.earthA, r1);
 
-  // polar lens: bottom right of the disc
-  const lr = Math.max(56, Math.min(104, r * 0.38));
-  const lx = Math.min(w - lr - 8, cx + r * 0.78);
-  const ly = Math.min(h - lr - 40, cy + r * 0.66);
+  // "South pole" inset: a square preview in the scene corner with a leader line from the pole.
+  // Size: the largest that keeps it off the Moon's disc (at least 104 px).
   const lens = data.globe?.lens;
+  const PAD = 14;
+  const CAP = 30; // caption height under the image
+  const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+  const touches = (sz: number) => {
+    const x0 = w - PAD - sz;
+    const y0 = h - PAD - CAP - sz;
+    return Math.hypot(clamp(cx, x0, w - PAD) - cx, clamp(cy, y0, h - PAD) - cy) < r + 10;
+  };
+  let ls = Math.round(clamp(Math.min(w, h) * 0.26, 104, 156));
+  while (ls > 104 && touches(ls)) ls -= 4;
+  const lx0 = w - PAD - ls; // image top-left corner
+  const ly0 = h - PAD - CAP - ls;
   const [bx0, by0, bx1, by1] = lens?.bounds ?? [0, 0, 1, 1];
-  const toLens = (x: number, y: number) => [((x - bx0) / (bx1 - bx0)) * 2 * lr, ((by1 - y) / (by1 - by0)) * 2 * lr];
+  const toLens = (x: number, y: number) => [((x - bx0) / (bx1 - bx0)) * ls, ((by1 - y) / (by1 - by0)) * ls];
   const poleL = toLens(0, 0);
-  const lead = ov.pole.visible && (() => {
-    const a = Math.atan2(ly - ov.pole.y, lx - ov.pole.x);
-    return <line x1={ov.pole.x + 16 * Math.cos(a)} y1={ov.pole.y + 16 * Math.sin(a)}
-                 x2={lx - lr * Math.cos(a)} y2={ly - lr * Math.sin(a)} stroke={T.sun} strokeWidth="1" />;
+  // leader: diagonally from the ring at the pole, then horizontally to the inset's left edge
+  const lead = ov.pole.visible && lens && (() => {
+    const ty = ly0 + 16;
+    const ex0 = lx0 - 22;
+    const a = Math.atan2(ty - ov.pole.y, ex0 - ov.pole.x);
+    const x1 = ov.pole.x + 10 * Math.cos(a);
+    const y1 = ov.pole.y + 10 * Math.sin(a);
+    if (Math.hypot(ex0 - x1, ty - y1) < 12) return null; // pole almost under the inset
+    return (
+      <g stroke={T.bracket} strokeWidth="1" fill="none">
+        <polyline points={`${x1},${y1} ${ex0},${ty} ${lx0 - 3},${ty}`} strokeOpacity="0.7" />
+        <circle cx={lx0 - 3} cy={ty} r="1.8" fill={T.bracket} stroke="none" />
+      </g>
+    );
   })();
 
   return (
@@ -461,7 +482,13 @@ function GlobeOverlay({ ov, data, selectedId, onZoomPole }: {
         <circle cx={ex} cy={ey} r="11" fill="none" stroke={T.earth} strokeOpacity="0.5" />
         <circle cx={sx} cy={sy} r="7" fill={T.sun} />
         <circle cx={sx} cy={sy} r="12" fill="none" stroke={T.sun} strokeOpacity="0.5" />
-        {ov.pole.visible && <circle cx={ov.pole.x} cy={ov.pole.y} r="16" fill="none" stroke={T.sun} strokeWidth="1.5" />}
+        {ov.pole.visible && (
+          <g stroke={T.bracket} fill="none" strokeWidth="1.2">
+            <circle cx={ov.pole.x} cy={ov.pole.y} r="9" />
+            <path d={`M${ov.pole.x - 14} ${ov.pole.y} h5 M${ov.pole.x + 9} ${ov.pole.y} h5
+                      M${ov.pole.x} ${ov.pole.y - 14} v5 M${ov.pole.x} ${ov.pole.y + 9} v5`} />
+          </g>
+        )}
         {lead}
       </svg>
       <div className="dir-label" style={{ left: Math.min(Math.max(sx, 62), w - 62), top: sy + 16, transform: "translateX(-50%)", textAlign: "center" }}>
@@ -477,29 +504,29 @@ function GlobeOverlay({ ov, data, selectedId, onZoomPole }: {
         </div>
       )}
       {lens && (
-        <>
-          <button className="lens" style={{ left: lx - lr, top: ly - lr, width: 2 * lr, height: 2 * lr }}
-                  onClick={onZoomPole} aria-label="Zoom into the south pole">
+        <button className="inset" style={{ left: lx0, top: ly0, width: ls }} onClick={onZoomPole}
+                aria-label="Open the south pole map">
+          <Brackets size={8} />
+          <span className="inset-img" style={{ height: ls }}>
             <img src={DATA_URL(lens.file)} alt="" />
-            <svg width={2 * lr} height={2 * lr} viewBox={`0 0 ${2 * lr} ${2 * lr}`}>
+            <svg width={ls} height={ls} viewBox={`0 0 ${ls} ${ls}`}>
               {data.sites.map((s) => {
                 const [x, y] = toLens(s.x, s.y);
-                if (x < 0 || y < 0 || x > 2 * lr || y > 2 * lr) return null;
+                if (x < 3 || y < 3 || x > ls - 3 || y > ls - 3) return null;
                 const sel = s.id === selectedId;
                 return (
                   <g key={s.id}>
-                    <circle cx={x} cy={y} r={sel ? 4.5 : 3} fill={s.group === "psr" ? T.psr : T.sun} stroke={T.bg} strokeWidth="1.5" />
-                    {sel && <circle cx={x} cy={y} r="9" fill="none" stroke={T.sun} strokeWidth="1.2" />}
+                    <circle cx={x} cy={y} r={sel ? 3.5 : 2.4} fill={s.group === "psr" ? T.psr : T.sun} stroke={T.bg} strokeWidth="1" />
+                    {sel && <circle cx={x} cy={y} r="7" fill="none" stroke={T.sun} strokeWidth="1" />}
                   </g>
                 );
               })}
-              <path d={`M${poleL[0] - 5} ${poleL[1]} H${poleL[0] + 5} M${poleL[0]} ${poleL[1] - 5} V${poleL[1] + 5}`} stroke={T.text} />
+              <path d={`M${poleL[0] - 4} ${poleL[1]} H${poleL[0] + 4} M${poleL[0]} ${poleL[1] - 4} V${poleL[1] + 4}`} stroke={T.text} />
             </svg>
-          </button>
-          <div className="lens-label" style={{ left: lx - lr - 20, top: ly + lr + 8, width: 2 * lr + 40 }}>
-            <b>SOUTH POLE · {Math.round((bx1 - bx0) / 1000)} KM</b><span>click to zoom in</span>
-          </div>
-        </>
+            <span className="inset-scale">{Math.round((bx1 - bx0) / 1000)} km</span>
+          </span>
+          <span className="inset-cap"><b>SOUTH POLE</b><span>{ls >= 140 ? "Open map ›" : "›"}</span></span>
+        </button>
       )}
       <div className="stage-hint">Drag to turn the Moon · scroll to zoom · click any spot south of 60°S</div>
     </>
