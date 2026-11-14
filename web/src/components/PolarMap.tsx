@@ -29,6 +29,18 @@ interface Props {
   pickedTag: MapTag | null;
   pickedLink: { x: number; y: number } | null; // nearest catalog site
   missions: Mission[]; // planned landing regions as dashed circles
+  route: MapRoute | null; // rover route: drawing or result
+  onRoute: (a: RouteAction) => void;
+}
+
+export type RouteAction = { kind: "tool" | "undo" | "done" | "cancel" } | { kind: "add"; x: number; y: number };
+
+export interface MapRoute {
+  way: [number, number][]; // polyline vertices
+  drawing: boolean;
+  lengthKm: number;
+  path?: { x: number; y: number; state: "lit" | "dark" | "ahead" }[]; // path points: how the rover drove them
+  rover?: { x: number; y: number } | null;
 }
 
 /** Leaflet in polar stereographic metres: LatLng = (y, x). */
@@ -138,7 +150,11 @@ export function PolarMap(props: Props) {
     };
     m.on("zoomend", onZoom);
     onZoom();
-    m.on("click", (e: L.LeafletMouseEvent) => handlers.current.onPick(e.latlng.lng, e.latlng.lat));
+    m.on("click", (e: L.LeafletMouseEvent) => {
+      // in drawing mode a click adds a route vertex, otherwise analyses the point
+      if (handlers.current.route?.drawing) handlers.current.onRoute({ kind: "add", x: e.latlng.lng, y: e.latlng.lat });
+      else handlers.current.onPick(e.latlng.lng, e.latlng.lat);
+    });
     let raf = 0;
     m.on("mousemove", (e: L.LeafletMouseEvent) => {
       cancelAnimationFrame(raf);
@@ -198,6 +214,58 @@ export function PolarMap(props: Props) {
     sync();
     return () => { m.off("zoomend", sync); g.remove(); tags.remove(); };
   }, [props.missions]);
+
+  // --- rover route: dashed while drawing; once computed, the path coloured
+  //     by whether the rover was in sunlight when it drove that leg
+  useEffect(() => {
+    const m = map.current;
+    const r = props.route;
+    if (!m || !r || r.way.length === 0) return;
+    const g = L.layerGroup().addTo(m);
+    const line = (pts: [number, number][], opts: L.PolylineOptions) =>
+      L.polyline(pts.map(([x, y]) => ll(x, y)), { interactive: false, ...opts }).addTo(g);
+    if (r.path && r.path.length > 1 && !r.drawing) {
+      line(r.path.map((p) => [p.x, p.y]), { color: T.bg, weight: 7, opacity: 0.85 });
+      let k0 = 0;
+      for (let k = 1; k <= r.path.length; k++) {
+        if (k < r.path.length && r.path[k].state === r.path[k0].state) continue;
+        const seg = r.path.slice(k0, Math.min(k + 1, r.path.length)).map((p) => [p.x, p.y] as [number, number]);
+        const st = r.path[k0].state;
+        line(seg, st === "lit" ? { color: T.sun, weight: 3.5 } : st === "dark" ? { color: T.night, weight: 3.5 }
+                                : { color: T.text, weight: 2, opacity: 0.5, dashArray: "4 5" });
+        k0 = k;
+      }
+    } else {
+      line(r.way, { color: T.text, weight: 2, dashArray: "6 5" });
+    }
+    r.way.forEach(([x, y], i) => {
+      L.marker(ll(x, y), {
+        interactive: false,
+        icon: L.divIcon({ className: "", iconSize: [12, 12], iconAnchor: [6, 6],
+                          html: `<div class="wp ${i === 0 ? "wp-start" : ""}">${i === 0 ? "" : ""}</div>` }),
+      }).addTo(g);
+    });
+    return () => { g.remove(); };
+  }, [props.route?.way, props.route?.path, props.route?.drawing]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // the rover separately, since it moves with the time cursor
+  const rover = useRef<L.Marker | null>(null);
+  useEffect(() => {
+    const m = map.current;
+    const p = props.route?.rover;
+    if (!m) return;
+    if (!p || props.route?.drawing) {
+      rover.current?.remove();
+      rover.current = null;
+      return;
+    }
+    if (!rover.current) {
+      rover.current = L.marker(ll(p.x, p.y), {
+        interactive: false, zIndexOffset: 1000,
+        icon: L.divIcon({ className: "", iconSize: [22, 22], iconAnchor: [11, 11], html: `<div class="rover"></div>` }),
+      }).addTo(m);
+    } else rover.current.setLatLng(ll(p.x, p.y));
+  }, [props.route?.rover?.x, props.route?.rover?.y, props.route?.drawing]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // --- catalog site markers and labels
   useEffect(() => {
@@ -289,9 +357,30 @@ export function PolarMap(props: Props) {
           </svg>
           Globe
         </button>
+        <button className={`tool ${props.route ? "on" : ""}`} onClick={() => props.onRoute({ kind: "tool" })}
+                title="Plan a rover traverse: click waypoints on the map">
+          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+            <path d="M2 12 L5 6 L9 8 L12 2" fill="none" stroke="currentColor" strokeWidth="1.3" />
+            <circle cx="2" cy="12" r="1.6" fill="currentColor" /><circle cx="12" cy="2" r="1.6" fill="currentColor" />
+          </svg>
+          Route
+        </button>
         <button className="tool" aria-label="Zoom in" onClick={() => zoom(1)}>+</button>
         <button className="tool" aria-label="Zoom out" onClick={() => zoom(-1)}>−</button>
       </div>
+      {props.route?.drawing && (
+        <div className="route-bar">
+          <span>
+            <b>Click the map to add waypoints</b>
+            <span className="mono">{props.route.way.length} pts · {props.route.lengthKm.toFixed(1)} km</span>
+          </span>
+          <button className="tool" disabled={!props.route.way.length} onClick={() => props.onRoute({ kind: "undo" })}>Undo</button>
+          <button className="tool" onClick={() => props.onRoute({ kind: "cancel" })}>Cancel</button>
+          <button className="tool primary" disabled={props.route.way.length < 2} onClick={() => props.onRoute({ kind: "done" })}>
+            Done
+          </button>
+        </div>
+      )}
       <div className="map-earth">
         EARTH
         <svg width="10" height="12" viewBox="0 0 10 12" aria-hidden="true"><path d="M5 0 L10 7 L6 7 L6 12 L4 12 L4 7 L0 7 Z" fill={T.earth} /></svg>
