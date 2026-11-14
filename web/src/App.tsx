@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 
 import { Boot, Header, MobileNav, TimeBar, type Tab } from "./components/Chrome";
 import { ComparePage, type CompareRow } from "./components/ComparePage";
-import { Globe } from "./components/Globe";
 import { Head, Panel } from "./components/hud";
 import { MethodPage } from "./components/MethodPage";
 import { PolarMap, type OverlayKey } from "./components/PolarMap";
@@ -15,6 +14,9 @@ import { autoStepMs, DAY_MS, fmtLat, fmtLon } from "./lib/format";
 import { T } from "./lib/theme";
 
 type Vec3 = [number, number, number];
+
+// three.js is needed only by the globe: separate chunk
+const Globe = lazy(() => import("./components/Globe").then((m) => ({ default: m.Globe })));
 
 function run(data: AppData, obs: Observer, horizon: Horizon, start: number, days: number): Analysis {
   const end = Math.min(start + days * DAY_MS, data.ephem.end);
@@ -95,13 +97,13 @@ export default function App() {
   const n = view?.analysis.series.t.length ?? 0;
   useEffect(() => {
     if (!playing || !n) return;
-    let raf = 0;
-    const step = Math.max(1, n / 1200);
+    const FPS = 30;
+    const step = n / (20 * FPS);
     let acc = 0;
-    const tick = () => {
+    const id = setInterval(() => {
       acc += step;
-      const d = Math.floor(acc);
-      acc -= d;
+      const d = Math.max(1, Math.floor(acc));
+      acc = Math.max(0, acc - d);
       setCursor((c) => {
         if (c + d >= n - 1) {
           setPlaying(false);
@@ -109,10 +111,8 @@ export default function App() {
         }
         return c + d;
       });
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    }, 1000 / FPS);
+    return () => clearInterval(id);
   }, [playing, n]);
 
   const clock = view ? view.analysis.series.t[Math.min(cursor, n - 1)] : null;
@@ -228,8 +228,10 @@ export default function App() {
           {left}
           <div className="stage">
             {stage === "globe" ? (
-              <Globe data={data} selectedId={picked ? null : selectedId} sunPctById={sunPctById}
-                     sunDir={dirs.sun} earthDir={dirs.earth} onPick={pickLatLon} onZoomPole={() => setStage("map")} />
+              <Suspense fallback={null}>
+                <Globe data={data} selectedId={picked ? null : selectedId} sunPctById={sunPctById}
+                       sunDir={dirs.sun} earthDir={dirs.earth} onPick={pickLatLon} onZoomPole={() => setStage("map")} />
+              </Suspense>
             ) : (
               <PolarMap data={data} selectedId={picked ? null : selectedId} sunPctById={sunPctById}
                         selectedTag={selected && mSel ? { title: selected.name.toUpperCase(),

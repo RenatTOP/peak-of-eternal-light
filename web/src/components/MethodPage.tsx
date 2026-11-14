@@ -47,8 +47,13 @@ export function MethodPage() {
           </table>
           <p>
             Known events are reproduced: Chandrayaan-3 sunset on 4 September 2023 and sunrise on
-            19–20 September, and IM-1 Odysseus sunset on 2 March 2024. For arbitrary points the live
-            horizon stays within about 2 pp of the 5 m catalog horizons.
+            19–20 September, and IM-1 Odysseus sunset on 2 March 2024.
+          </p>
+          <p>
+            <b>Any point on the map</b>: against full 5 m horizons, the live browser horizon differs by a median
+            0.3 pp in annual sunlight (random points near the landing regions) and 0.4 pp at catalog sites.
+            Errors grow where the Sun or Earth skims a sharp ridge that 80 m terrain smooths out,
+            e.g. the rim of the Mons Mouton plateau.
           </p>
         </Panel>
       </div>

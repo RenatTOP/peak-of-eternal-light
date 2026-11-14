@@ -23,7 +23,7 @@ function value(r: CompareRow, k: Key): number {
 }
 
 /** Year strip: Sun share over 73 slices of the period. */
-function Strip({ a, width = 150, height = 16 }: { a: Analysis; width?: number; height?: number }) {
+function Strip({ a, width = 128, height = 16 }: { a: Analysis; width?: number; height?: number }) {
   const f = a.series.sunFrac;
   const bins = 73;
   const rects = [];
@@ -69,7 +69,7 @@ export function ComparePage({ rows, selectedId, onOpen, period }: {
         <div className="ctable">
           <div className="crow head-row">
             <span />{th(null, "SITE")}{th("sun", "SOLAR ENERGY")}{th("night", "LONGEST NIGHT", true)}
-            {th("earth", "LINK TO EARTH")}{th("gap", "LONGEST GAP", true)}{th("both", "SUN+EARTH", true)}{th(null, "SUNLIGHT OVER THE PERIOD")}
+            {th("earth", "LINK TO EARTH")}{th("gap", "LONGEST GAP", true)}{th("both", "SUN+EARTH", true)}{th(null, "SUNLIGHT BY DATE")}
           </div>
           {sorted.map((r, n) => {
             const m = r.analysis.metrics;

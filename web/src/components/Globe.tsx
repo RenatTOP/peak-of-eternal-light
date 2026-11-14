@@ -176,12 +176,36 @@ export function Globe({ data, selectedId, sunPctById, sunDir, earthDir, onPick, 
     const cv = canvas.current;
     if (!cv) return;
     let drag: { x: number; y: number; moved: number } | null = null;
+    const touches = new Map<number, [number, number]>();
+    let pinch = 0; // distance between two fingers
+    const zoomBy = (f: number) => {
+      const g = gl.current;
+      if (!g) return;
+      zoomed.current = true;
+      g.camera.position.z = Math.min(9, Math.max(1.35, g.camera.position.z * f));
+      g.render();
+    };
     const down = (e: PointerEvent) => {
       cv.setPointerCapture(e.pointerId);
-      drag = { x: e.clientX, y: e.clientY, moved: 0 };
+      touches.set(e.pointerId, [e.clientX, e.clientY]);
+      if (touches.size === 2) {
+        const [a, b] = [...touches.values()];
+        pinch = Math.hypot(a[0] - b[0], a[1] - b[1]);
+        drag = null;
+      } else {
+        drag = { x: e.clientX, y: e.clientY, moved: 0 };
+      }
     };
     const move = (e: PointerEvent) => {
       const g = gl.current;
+      if (touches.has(e.pointerId)) touches.set(e.pointerId, [e.clientX, e.clientY]);
+      if (touches.size === 2 && pinch > 0) {
+        const [a, b] = [...touches.values()];
+        const d = Math.hypot(a[0] - b[0], a[1] - b[1]);
+        zoomBy(pinch / Math.max(d, 1));
+        pinch = d;
+        return;
+      }
       if (!drag || !g) return;
       const dx = e.clientX - drag.x;
       const dy = e.clientY - drag.y;
@@ -194,6 +218,8 @@ export function Globe({ data, selectedId, sunPctById, sunDir, earthDir, onPick, 
       g.render();
     };
     const up = (e: PointerEvent) => {
+      touches.delete(e.pointerId);
+      if (touches.size < 2) pinch = 0;
       const g = gl.current;
       if (drag && drag.moved < 5 && g) {
         const r = cv.getBoundingClientRect();
@@ -211,21 +237,19 @@ export function Globe({ data, selectedId, sunPctById, sunDir, earthDir, onPick, 
       drag = null;
     };
     const wheel = (e: WheelEvent) => {
-      const g = gl.current;
-      if (!g) return;
       e.preventDefault();
-      zoomed.current = true;
-      g.camera.position.z = Math.min(9, Math.max(1.35, g.camera.position.z * (1 + e.deltaY * 0.0012)));
-      g.render();
+      zoomBy(1 + e.deltaY * 0.0012);
     };
     cv.addEventListener("pointerdown", down);
     cv.addEventListener("pointermove", move);
     cv.addEventListener("pointerup", up);
+    cv.addEventListener("pointercancel", up);
     cv.addEventListener("wheel", wheel, { passive: false });
     return () => {
       cv.removeEventListener("pointerdown", down);
       cv.removeEventListener("pointermove", move);
       cv.removeEventListener("pointerup", up);
+      cv.removeEventListener("pointercancel", up);
       cv.removeEventListener("wheel", wheel);
     };
   }, []);
@@ -286,7 +310,7 @@ function GlobeOverlay({ ov, data, selectedId, onZoomPole }: {
         {ov.pole.visible && <circle cx={ov.pole.x} cy={ov.pole.y} r="16" fill="none" stroke={T.sun} strokeWidth="1.5" />}
         {lead}
       </svg>
-      <div className="dir-label" style={{ left: sx, top: sy + 16, transform: "translateX(-50%)", textAlign: "center" }}>
+      <div className="dir-label" style={{ left: Math.min(Math.max(sx, 62), w - 62), top: sy + 16, transform: "translateX(-50%)", textAlign: "center" }}>
         <b style={{ color: T.sun }}>SUN</b><span>grazing the pole</span>
       </div>
       <div className="dir-label" style={{ left: ex + (Math.cos(ov.earthA) < 0 ? -18 : 18), top: ey - 16,
