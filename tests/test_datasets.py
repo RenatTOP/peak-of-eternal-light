@@ -6,6 +6,7 @@ from pipeline.datasets import (
     DEFAULT_ORDER,
     GROUPS,
     ROOT,
+    SFS_REGIONS,
     SITE_TILES,
     clone_items,
     items_for,
@@ -42,6 +43,17 @@ def test_clones_skip_permanently_shadowed_craters():
     assert "Haworth" not in tiles and "Shoemaker" not in tiles
     assert {"Site01", "Site04"} <= tiles
     assert len(clone_items(["Site04"], n=20)) == 20
+
+
+def test_every_sfs_region_maps_to_a_site_in_yaml():
+    sites = load_sites()
+    for region in SFS_REGIONS:
+        assert region.site_id in sites, f"{region.prefix} -> {region.site_id} not in sites.yaml"
+        site = sites[region.site_id]
+        assert site.sfs == region.prefix
+        assert site.tile == region.lola_tile
+    prefixes = [r.prefix for r in SFS_REGIONS]
+    assert len(prefixes) == len(set(prefixes)) == 13
 
 
 def test_every_tile_maps_to_a_site_in_yaml():

@@ -203,6 +203,87 @@ def items_for(groups: list[str]) -> list[Item]:
 
 
 # --------------------------------------------------------------------------- #
+# Shape-from-Shading DEM (Bertone et al.), downloaded by hand from Zenodo
+# --------------------------------------------------------------------------- #
+
+DEM_SFS = DATA / "dem" / "sfs"
+
+# SfS nodata is the minimum float32, not NaN
+SFS_NODATA_BELOW = -1e30
+
+
+@dataclass(frozen=True)
+class SfsRegion:
+    """Artemis III candidate region (2022) with 5 m/px SfS terrain.
+
+    8 of the 13 regions sit exactly on the LOLA 5 m tile grid (lola_tile),
+    so SfS replaces LOLA pixel for pixel.
+    """
+
+    num: int
+    folder: str
+    name: str
+    site_id: str
+    lola_tile: str | None = None
+
+    @property
+    def prefix(self) -> str:
+        return f"A3{self.num:02d}"
+
+    @property
+    def dir(self) -> Path:
+        return DEM_SFS / self.folder
+
+    def product(self, kind: str) -> Path:
+        """ELEV, SIGM, DIFF, MASK, OMOS, BRES, SBCT, SBCTALL; HILL separately."""
+        if kind == "HILL":
+            return self.dir / f"{self.prefix}_GLDHILL_005_315_45.tif"
+        return self.dir / f"{self.prefix}_GLD{kind}_005.tif"
+
+    @property
+    def elev(self) -> Path:
+        return self.product("ELEV")
+
+    @property
+    def available(self) -> bool:
+        return self.elev.exists()
+
+
+SFS_PRODUCTS: dict[str, str] = {
+    "ELEV": "SfS height, m above the 1737.4 km sphere",
+    "SIGM": "SfS height error estimate, m",
+    "DIFF": "SfS minus LOLA, m",
+    "MASK": "how many lit image pixels contributed",
+    "OMOS": "max-illumination LROC NAC orthomosaic, the true look of the surface",
+    "HILL": "hillshade (azimuth 315°, elevation 45°)",
+    "BRES": "best resolution of the input images, m",
+    "SBCT": "number of distinct illumination directions per pixel",
+}
+
+SFS_REGIONS: tuple[SfsRegion, ...] = (
+    SfsRegion(0, "A3CLR22_0_Amundsen_Rim", "Amundsen Rim", "amundsen-rim"),
+    SfsRegion(1, "A3CLR22_1_Nobile_Rim_2", "Nobile Rim 2", "nobile-rim-2", "DM2"),
+    SfsRegion(2, "A3CLR22_2_Haworth", "Haworth", "haworth", "Haworth"),
+    SfsRegion(3, "A3CLR22_3_Faustini_Rim_A", "Faustini Rim A", "faustini-rim-a"),
+    SfsRegion(4, "A3CLR22_4_deGerlache_Rim_2", "de Gerlache Rim 2", "de-gerlache-rim-2"),
+    SfsRegion(5, "A3CLR22_5_Connecting_Ridge_Extension", "Connecting Ridge Extension",
+              "connecting-ridge-ext"),
+    SfsRegion(6, "A3CLR22_6_Connecting_Ridge", "Connecting Ridge", "connecting-ridge", "Site01"),
+    SfsRegion(7, "A3CLR22_7_Nobile_Rim_1", "Nobile Rim 1", "nobile-rim-1", "Site06"),
+    SfsRegion(8, "A3CLR22_8_Peak_Near_Shackleton", "Peak Near Shackleton",
+              "peak-near-shackleton", "Site07"),
+    SfsRegion(9, "A3CLR22_9_deGerlache_Rim", "de Gerlache Rim", "de-gerlache-rim", "Site11"),
+    SfsRegion(10, "A3CLR22_10_Leibnitz_Beta_Plateau", "Leibnitz Beta Plateau", "mons-mouton",
+              "Site20"),
+    SfsRegion(11, "A3CLR22_11_Malapert_Massif", "Malapert Massif", "malapert-massif", "Site23"),
+    SfsRegion(12, "A3CLR22_12_deGerlache_Kocher_Massif", "de Gerlache–Kocher Massif",
+              "de-gerlache-kocher"),
+)
+
+SFS_BY_SITE = {r.site_id: r for r in SFS_REGIONS}
+
+
+# --------------------------------------------------------------------------- #
 # what a script can't download
 # --------------------------------------------------------------------------- #
 
@@ -221,7 +302,7 @@ MANUAL: tuple[ManualDataset, ...] = (
     ManualDataset(
         name="Shape-from-Shading DEM, 13 Artemis III regions (5 m/px)",
         url="https://doi.org/10.5281/zenodo.17954508",
-        dest=DATA / "dem" / "sfs",
+        dest=DEM_SFS,
         why="LOLA DEM is interpolated between laser tracks; SfS adds real small "
             "craters from LROC NAC images. The best near-field terrain there is.",
         cite="Bertone et al., PSJ, doi:10.3847/PSJ/ae5b70",

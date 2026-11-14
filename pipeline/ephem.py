@@ -47,6 +47,7 @@ class Site:
     elev: float = 0.0  # m above the R_MOON_KM sphere
     note: str = ""
     tile: str | None = None  # LOLA 5 m tile, if any
+    sfs: str | None = None  # Shape-from-Shading region (A3NN), if any
     refine: bool = False  # coordinate still to be refined on the illumination map
 
     @property
@@ -89,6 +90,7 @@ def load_sites(path: Path = SITES_PATH) -> dict[str, Site]:
             elev=float(entry.get("elev", 0.0)),
             note=(entry.get("note") or "").strip(),
             tile=entry.get("tile"),
+            sfs=entry.get("sfs"),
             refine=bool(entry.get("refine", False)),
         )
         sites[site.id] = site

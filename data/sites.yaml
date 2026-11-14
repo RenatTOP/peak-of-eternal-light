@@ -4,6 +4,8 @@
 # lon  — east longitude, deg 0..360
 # elev — surface height above the 1737.4 km sphere, m (LOLA DEM)
 # tile — LOLA 5 m tile (data/dem/sites/<tile>/), if any
+# sfs  — 5 m Shape-from-Shading region (data/dem/sfs/, Bertone et al.), if any;
+#        SfS wins where both exist (same grid, real small-scale detail)
 #
 # Coordinates of points with a tile are the Barker et al. (2021) tile centre; the tiles were built
 # around the Mazarico et al. (2011) sites. From: python -m pipeline.site_tiles
@@ -16,6 +18,7 @@ sites:
   - id: connecting-ridge
     name: Connecting Ridge
     tile: Site01
+    sfs: A306
     lat: -89.4632
     lon: 222.5104
     elev: 1945
@@ -37,6 +40,7 @@ sites:
   - id: peak-near-shackleton
     name: Peak near Shackleton
     tile: Site07
+    sfs: A308
     lat: -88.8110
     lon: 123.69
     elev: 1646
@@ -45,6 +49,7 @@ sites:
   - id: de-gerlache-rim
     name: de Gerlache rim
     tile: Site11
+    sfs: A309
     lat: -88.6834
     lon: 292.07
     elev: 1794
@@ -52,6 +57,7 @@ sites:
   - id: mons-mouton
     name: Mons Mouton plateau (Leibnitz β)
     tile: Site20
+    sfs: A310
     lat: -85.4266
     lon: 31.74
     elev: 6399
@@ -62,6 +68,7 @@ sites:
   - id: nobile-rim-1
     name: Nobile rim 1
     tile: Site06
+    sfs: A307
     lat: -85.4381
     lon: 37.37
     elev: 5946
@@ -71,6 +78,7 @@ sites:
   - id: nobile-rim-2
     name: Nobile rim 2
     tile: DM2
+    sfs: A301
     lat: -83.9540
     lon: 58.82
     elev: 1010
@@ -78,10 +86,55 @@ sites:
   - id: malapert-massif
     name: Malapert massif
     tile: Site23
+    sfs: A311
     lat: -85.9948
     lon: 359.76
     elev: 4784
     note: High massif with good Earth visibility, a historical relay candidate.
+
+  # --- Artemis III candidate regions with SfS only (no LOLA 5 m tile) ------
+  # Centre = centre of the region rectangle (Bertone et al.), not a chosen point.
+
+  - id: connecting-ridge-ext
+    name: Connecting Ridge Extension
+    sfs: A305
+    lat: -89.032
+    lon: 258.00
+    elev: 1179
+    refine: true
+    note: Continuation of Connecting Ridge; centre on a slope, ~1370 m crest 1 km away.
+
+  - id: de-gerlache-rim-2
+    name: de Gerlache Rim 2
+    sfs: A304
+    lat: -88.230
+    lon: 295.37
+    elev: -88
+    refine: true
+
+  - id: faustini-rim-a
+    name: Faustini Rim A
+    sfs: A303
+    lat: -87.890
+    lon: 90.00
+    elev: 47
+    refine: true
+    note: Rim of Faustini crater (permanent shadow and likely water ice inside).
+
+  - id: de-gerlache-kocher
+    name: de Gerlache–Kocher Massif
+    sfs: A312
+    lat: -85.830
+    lon: 243.68
+    elev: 2710
+
+  - id: amundsen-rim
+    name: Amundsen Rim
+    sfs: A300
+    lat: -84.229
+    lon: 69.44
+    elev: 401
+    refine: true
 
   # --- real missions -------------------------------------------------------
   - id: im2-athena
@@ -97,6 +150,7 @@ sites:
   - id: haworth
     name: Haworth crater
     tile: Haworth
+    sfs: A302
     lat: -86.7639
     lon: 337.22
     elev: 1628
