@@ -79,7 +79,7 @@ export const httpLoader = (base: string): Loader => async (path) => {
 };
 
 /** Unpacked gzip file or null (missing file; the dev server answers a missing file with index.html). */
-async function loadGz(load: Loader, path: string): Promise<ArrayBuffer | null> {
+export async function loadGz(load: Loader, path: string): Promise<ArrayBuffer | null> {
   const b = await load(path);
   if (!b || b.byteLength < 2) return null;
   const head = new Uint8Array(b, 0, 2);
@@ -87,7 +87,7 @@ async function loadGz(load: Loader, path: string): Promise<ArrayBuffer | null> {
   return gunzip(b);
 }
 
-async function loadJson<T>(load: Loader, path: string): Promise<T | null> {
+export async function loadJson<T>(load: Loader, path: string): Promise<T | null> {
   const b = await load(path);
   if (!b) return null;
   try {
