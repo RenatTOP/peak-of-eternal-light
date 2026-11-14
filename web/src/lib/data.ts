@@ -1,5 +1,5 @@
+import { AnyPoint, httpLoader } from "./anypoint";
 import { Ephem, Horizon, type EphemMeta } from "./astro";
-import { HorizonGrid } from "./grid";
 
 export type SiteGroup = "candidate" | "mission" | "psr";
 
@@ -35,6 +35,13 @@ export interface ImageLayer {
   source?: string;
 }
 
+export interface GlobeMeta {
+  color: string;
+  normal: string;
+  lens: ImageLayer;
+  source: string;
+}
+
 export interface AppData {
   ephem: Ephem;
   sites: SiteInfo[];
@@ -42,7 +49,8 @@ export interface AppData {
   map: MapMeta;
   overlays: Record<string, ImageLayer>;
   closeups: Record<string, ImageLayer>;
-  grid: HorizonGrid | null; // horizons for any point (preview)
+  globe: GlobeMeta | null;
+  anyPoint: AnyPoint | null; // horizon of any point (near terrain + far-mountain grid)
 }
 
 const BASE = "data/";
@@ -59,21 +67,34 @@ async function binary(path: string): Promise<ArrayBuffer> {
   return r.arrayBuffer();
 }
 
-export async function loadAppData(): Promise<AppData> {
-  const [meta, eph, sites, map, overlays, closeups, grid] = await Promise.all([
-    json<EphemMeta>("ephem.json"),
-    binary("ephem.bin"),
-    json<SiteInfo[]>("sites.json"),
+export type LoadStep = "ephem" | "horizons" | "map";
+
+/** Loads everything needed to start; onStep reports each finished stage. */
+export async function loadAppData(onStep: (s: LoadStep) => void = () => {}): Promise<AppData> {
+  const ephemP = Promise.all([json<EphemMeta>("ephem.json"), binary("ephem.bin")]).then(([meta, eph]) => {
+    onStep("ephem");
+    return new Ephem(meta, new Float32Array(eph));
+  });
+  const sitesP = json<SiteInfo[]>("sites.json").then(async (sites) => {
+    const horizons = new Map<string, Horizon>();
+    await Promise.all(
+      sites.map(async (s) => horizons.set(s.id, Horizon.fromInt16Centideg(await binary(`horizons/${s.id}.bin`)))),
+    );
+    onStep("horizons");
+    return { sites, horizons };
+  });
+  const mapP = Promise.all([
     json<MapMeta>("map.json"),
     json<Record<string, ImageLayer>>("overlays/overlays.json").catch(() => ({})),
     json<Record<string, ImageLayer>>("closeups/closeups.json").catch(() => ({})),
-    HorizonGrid.load(BASE).catch(() => null),
-  ]);
-  const horizons = new Map<string, Horizon>();
-  await Promise.all(
-    sites.map(async (s) => horizons.set(s.id, Horizon.fromInt16Centideg(await binary(`horizons/${s.id}.bin`)))),
-  );
-  return { ephem: new Ephem(meta, new Float32Array(eph)), sites, horizons, map, overlays, closeups, grid };
+    json<GlobeMeta>("globe/globe.json").catch(() => null),
+    AnyPoint.load(httpLoader(BASE)).catch(() => null),
+  ]).then((r) => {
+    onStep("map");
+    return r;
+  });
+  const [ephem, { sites, horizons }, [map, overlays, closeups, globe, anyPoint]] = await Promise.all([ephemP, sitesP, mapP]);
+  return { ephem, sites, horizons, map, overlays, closeups, globe, anyPoint };
 }
 
 export const DATA_URL = (file: string) => BASE + file;

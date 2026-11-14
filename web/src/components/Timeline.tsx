@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 
 import type { Series } from "../lib/astro";
 import { DAY_MS } from "../lib/format";
+import { T } from "../lib/theme";
 import { useCanvas } from "./useCanvas";
 
 interface Props {
@@ -11,20 +12,20 @@ interface Props {
 }
 
 const C = {
-  bg: "#070b17",
-  night: "#10162a",
-  sun: "#f5b528",
-  earth: "#3aa6e6",
-  both: "#39d98a",
-  grid: "rgba(143,163,200,0.16)",
-  label: "#8fa3c8",
+  lane: T.lane,
+  sun: T.sun,
+  earth: T.earth,
+  both: T.both,
+  grid: "#1A3044",
+  label: T.faint,
+  name: T.muted,
 };
 
 /** Lanes over time: Sun disc share, direct link, both; click/drag sets the cursor. */
 export function Timeline({ series, cursor, onCursor }: Props) {
   const ref = useRef<HTMLCanvasElement>(null);
   const size = useCanvas(ref);
-  const pad = { l: 58, r: 10, t: 6, b: 20 };
+  const pad = { l: 44, r: 2, t: 6, b: 18 };
 
   useEffect(() => {
     const cv = ref.current;
@@ -36,8 +37,7 @@ export function Timeline({ series, cursor, onCursor }: Props) {
     const pw = w - pad.l - pad.r;
     const X = (i: number) => pad.l + (i / (n - 1)) * pw;
 
-    ctx.fillStyle = C.bg;
-    ctx.fillRect(0, 0, w, h);
+    ctx.clearRect(0, 0, w, h);
 
     // three lanes
     const rows = [
@@ -48,11 +48,11 @@ export function Timeline({ series, cursor, onCursor }: Props) {
     rows[1].y = rows[0].y + rows[0].hgt + 3;
     rows[2].y = rows[1].y + rows[1].hgt + 3;
 
-    ctx.font = "11px system-ui, sans-serif";
+    ctx.font = `11.5px ${T.sans}`;
     for (const r of rows) {
-      ctx.fillStyle = C.night;
+      ctx.fillStyle = C.lane;
       ctx.fillRect(pad.l, r.y, pw, r.hgt);
-      ctx.fillStyle = C.label;
+      ctx.fillStyle = C.name;
       ctx.fillText(r.name, 6, r.y + r.hgt / 2 + 4);
     }
 
@@ -84,6 +84,7 @@ export function Timeline({ series, cursor, onCursor }: Props) {
     const ticks = timeTicks(series.t[0], series.t[n - 1], span);
     ctx.strokeStyle = C.grid;
     ctx.fillStyle = C.label;
+    ctx.font = `10px ${T.mono}`;
     let labelEnd = -Infinity;
     for (const [t, label] of ticks) {
       const x = pad.l + ((t - series.t[0]) / span) * pw;
@@ -101,12 +102,14 @@ export function Timeline({ series, cursor, onCursor }: Props) {
 
     // cursor
     const cx = X(Math.min(Math.max(cursor, 0), n - 1));
-    ctx.strokeStyle = "#ffffff";
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = T.text;
+    ctx.fillStyle = T.text;
+    ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(cx, pad.t - 2);
-    ctx.lineTo(cx, h - pad.b);
+    ctx.moveTo(cx, pad.t);
+    ctx.lineTo(cx, h - pad.b + 2);
     ctx.stroke();
+    ctx.fillRect(cx - 4, 0, 8, 7);
     ctx.lineWidth = 1;
   }, [series, cursor, size]); // eslint-disable-line react-hooks/exhaustive-deps
 

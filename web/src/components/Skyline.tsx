@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 
 import type { Horizon, Series } from "../lib/astro";
+import { T } from "../lib/theme";
 import { useCanvas } from "./useCanvas";
 
 interface Props {
@@ -10,13 +11,13 @@ interface Props {
 }
 
 const C = {
-  sky: "#070b17",
-  grid: "rgba(143,163,200,0.14)",
-  label: "#8fa3c8",
-  terrain: "#2b3142",
-  ridge: "#c9ccd6",
-  sun: "#f5b528",
-  earth: "#3aa6e6",
+  grid: T.grid,
+  label: T.faint,
+  terrain: T.terrain,
+  ridge: T.ridge,
+  sun: T.sun,
+  earth: T.earth,
+  zero: T.zero,
 };
 
 /** Terrain horizon + Sun and Earth tracks over the period + their discs at the cursor. */
@@ -30,7 +31,7 @@ export function Skyline({ horizon, series, cursor }: Props) {
     const ctx = cv.getContext("2d")!;
     const { w, h, dpr } = size;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const pad = { l: 38, r: 10, t: 10, b: 22 };
+    const pad = { l: 30, r: 2, t: 4, b: 18 };
     const pw = w - pad.l - pad.r;
     const ph = h - pad.t - pad.b;
 
@@ -44,11 +45,10 @@ export function Skyline({ horizon, series, cursor }: Props) {
     const Y = (el: number) => pad.t + ((hi - el) / (hi - lo)) * ph;
     const degPx = ph / (hi - lo);
 
-    ctx.fillStyle = C.sky;
-    ctx.fillRect(0, 0, w, h);
+    ctx.clearRect(0, 0, w, h);
 
     // grid
-    ctx.font = "11px system-ui, sans-serif";
+    ctx.font = `9.5px ${T.mono}`;
     ctx.strokeStyle = C.grid;
     ctx.fillStyle = C.label;
     ctx.lineWidth = 1;
@@ -58,7 +58,9 @@ export function Skyline({ horizon, series, cursor }: Props) {
       ctx.moveTo(pad.l, Y(e));
       ctx.lineTo(w - pad.r, Y(e));
       ctx.stroke();
-      ctx.fillText(`${e.toFixed(stepEl < 1 ? 1 : 0)}°`, 4, Y(e) + 4);
+      ctx.textAlign = "right";
+      ctx.fillText(`${e.toFixed(stepEl < 1 ? 1 : 0)}°`, pad.l - 5, Y(e) + 3.5);
+      ctx.textAlign = "left";
     }
     const names = ["N", "NE", "E", "SE", "S", "SW", "W", "NW", "N"];
     for (let i = 0; i <= 8; i++) {
@@ -67,7 +69,9 @@ export function Skyline({ horizon, series, cursor }: Props) {
       ctx.moveTo(x, pad.t);
       ctx.lineTo(x, h - pad.b);
       ctx.stroke();
-      ctx.fillText(names[i], x - (i === 8 ? 10 : i === 0 ? 0 : 6), h - 6);
+      ctx.textAlign = i === 0 ? "left" : i === 8 ? "right" : "center";
+      ctx.fillText(names[i], x, h - 5);
+      ctx.textAlign = "left";
     }
 
     // tracks over the period (under the terrain)
@@ -88,14 +92,13 @@ export function Skyline({ horizon, series, cursor }: Props) {
     const disc = (az: number, alt: number, rDeg: number, color: string, glow: boolean) => {
       const r = Math.max(rDeg * degPx, 3);
       ctx.save();
-      if (glow) {
-        ctx.shadowColor = color;
-        ctx.shadowBlur = 14;
-      }
       ctx.fillStyle = color;
+      ctx.strokeStyle = T.bg;
+      ctx.lineWidth = glow ? 1.5 : 1.5;
       ctx.beginPath();
       ctx.arc(X(az), Y(alt), r, 0, Math.PI * 2);
       ctx.fill();
+      ctx.stroke();
       ctx.restore();
     };
     const i = Math.min(Math.max(cursor, 0), n - 1);
@@ -114,7 +117,7 @@ export function Skyline({ horizon, series, cursor }: Props) {
     ctx.fillStyle = C.terrain;
     ctx.fill();
     ctx.strokeStyle = C.ridge;
-    ctx.lineWidth = 1;
+    ctx.lineWidth = 1.25;
     ctx.beginPath();
     for (let k = 0; k <= horizon.n; k++) {
       const x = X(k * horizon.step);
@@ -125,8 +128,8 @@ export function Skyline({ horizon, series, cursor }: Props) {
     ctx.stroke();
 
     // mathematical horizon
-    ctx.setLineDash([3, 4]);
-    ctx.strokeStyle = "rgba(255,255,255,0.35)";
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = C.zero;
     ctx.beginPath();
     ctx.moveTo(pad.l, Y(0));
     ctx.lineTo(w - pad.r, Y(0));
