@@ -90,6 +90,52 @@ function capGeometry(cap: GlobeCap, fadeDeg: number): THREE.BufferGeometry {
   return g;
 }
 
+// Analysis zone around the south pole: edge latitudes come from the far-mountain grid
+// so the drawing always matches where a click gives a result.
+function analysisZone(data: AppData): { outerLat: number; innerLat: number } {
+  const z = data.anyPoint?.far.meta.zones;
+  const lat = (rho: number) => -90 + (2 * Math.atan(rho / (2 * R_MOON_M))) / D2R;
+  return {
+    outerLat: lat(z?.outer?.rho_max_m ?? 925_000),
+    innerLat: lat(z?.inner ? z.inner.rho_max_m - z.inner.spacing_m : 298_000),
+  };
+}
+
+// Translucent disc from the pole to the edge: faint inside, denser at the rim
+function zoneFill(outerLat: number): THREE.BufferGeometry {
+  const RINGS = 48;
+  const SEG = 256;
+  const edge = (90 + outerLat) * D2R;
+  const pos: number[] = [];
+  const col: number[] = [];
+  for (let i = 0; i <= RINGS; i++) {
+    const colat = (edge * i) / RINGS;
+    const t = Math.max(0, (colat - edge * 0.7) / (edge * 0.3)); // 0 inside, 1 at the edge
+    const alpha = 0.03 + 0.16 * t * t;
+    for (let j = 0; j <= SEG; j++) {
+      const p = toThree(unit(-90 + colat / D2R, (360 * j) / SEG)).multiplyScalar(1.0015);
+      pos.push(p.x, p.y, p.z);
+      col.push(1, 1, 1, alpha);
+    }
+  }
+  const idx: number[] = [];
+  const at = (i: number, j: number) => i * (SEG + 1) + j;
+  for (let i = 0; i < RINGS; i++) {
+    for (let j = 0; j < SEG; j++) idx.push(at(i, j), at(i + 1, j + 1), at(i + 1, j), at(i, j), at(i, j + 1), at(i + 1, j + 1));
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute("color", new THREE.Float32BufferAttribute(col, 4));
+  g.setIndex(idx);
+  return g;
+}
+
+function latRing(lat: number, r = 1.002): THREE.BufferGeometry {
+  const pts: THREE.Vector3[] = [];
+  for (let j = 0; j < 360; j++) pts.push(toThree(unit(lat, j)).multiplyScalar(r));
+  return new THREE.BufferGeometry().setFromPoints(pts);
+}
+
 const VIEW_LAT = -70; // view from below the pole, slightly towards Earth
 const FOV = 22;
 const DIST0 = 5.4;
@@ -103,6 +149,8 @@ interface Overlay {
   sunA: number;
   earthA: number;
   pole: { x: number; y: number; visible: boolean };
+  zone: { x: number; y: number } | null; // where to label the analysis zone edge
+  zoneLat: number;
 }
 
 export function Globe({ data, selectedId, sunPctById, sunDir, earthDir, onPick, onZoomPole }: Props) {
@@ -164,6 +212,18 @@ export function Globe({ data, selectedId, sunPctById, sunDir, earthDir, onPick, 
       m.renderOrder = 1;
       moon.add(m);
     }
+    const zone = analysisZone(data);
+    const fill = new THREE.Mesh(zoneFill(zone.outerLat), new THREE.MeshBasicMaterial({
+      color: T.bracket, vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide,
+    }));
+    fill.renderOrder = 2;
+    const edge = new THREE.LineLoop(latRing(zone.outerLat),
+      new THREE.LineBasicMaterial({ color: T.bracket, transparent: true, opacity: 0.95 }));
+    const inner = new THREE.LineLoop(latRing(zone.innerLat),
+      new THREE.LineDashedMaterial({ color: T.bracket, transparent: true, opacity: 0.6, dashSize: 0.01, gapSize: 0.008 }));
+    inner.computeLineDistances();
+    edge.renderOrder = inner.renderOrder = 3;
+    moon.add(fill, edge, inner);
     scene.add(moon);
     const light = new THREE.DirectionalLight(0xffffff, 3.4);
     scene.add(light, new THREE.AmbientLight(0x9ec3dc, 0.05));
@@ -198,12 +258,23 @@ export function Globe({ data, selectedId, sunPctById, sunDir, earthDir, onPick, 
         const p = toThree(v).applyQuaternion(moon.quaternion);
         return Math.atan2(-p.y, p.x);
       };
+      let zoneAt: { x: number; y: number } | null = null;
+      for (let j = 0; j < 360; j += 2) {
+        const p = toThree(unit(zone.outerLat, j)).applyQuaternion(moon.quaternion);
+        if (p.z < 1.25 / d) continue; // unreadable near the disc edge
+        const q = p.clone().project(camera);
+        const sx = (q.x + 1) * w / 2;
+        const sy = (1 - q.y) * h / 2;
+        if (sy < 40 || sx < 70 || sx > w - 70) continue; // label must fit in the frame
+        if (!zoneAt || sy < zoneAt.y) zoneAt = { x: sx, y: sy };
+      }
       const pole = toThree([0, 0, -1]).applyQuaternion(moon.quaternion);
       const pp = pole.clone().project(camera);
       setOv({
         w, h, cx: w / 2, cy: h / 2, r,
         sunA: ang(dirs.current.sun), earthA: ang(dirs.current.earth),
         pole: { x: (pp.x + 1) * w / 2, y: (1 - pp.y) * h / 2, visible: pole.z > 1 / d },
+        zone: zoneAt, zoneLat: zone.outerLat,
       });
     };
 
@@ -401,6 +472,11 @@ function GlobeOverlay({ ov, data, selectedId, onZoomPole }: {
                                           transform: Math.cos(ov.earthA) < 0 ? "translateX(-100%)" : undefined }}>
         <b style={{ color: T.earth }}>EARTH</b><span>near side</span>
       </div>
+      {ov.zone && (
+        <div className="zone-label" style={{ left: ov.zone.x, top: ov.zone.y }}>
+          <b>ANALYSIS ZONE</b><span>any spot south of {Math.round(-ov.zoneLat)}°S</span>
+        </div>
+      )}
       {lens && (
         <>
           <button className="lens" style={{ left: lx - lr, top: ly - lr, width: 2 * lr, height: 2 * lr }}

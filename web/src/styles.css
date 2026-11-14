@@ -135,6 +135,10 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .dir-label { position: absolute; display: flex; flex-direction: column; gap: 1px; pointer-events: none; }
 .dir-label b { font-size: 12px; font-weight: 600; letter-spacing: 0.14em; }
 .dir-label span { font: 11px var(--mono); color: var(--muted); }
+.zone-label { position: absolute; transform: translate(-50%, calc(-100% - 6px)); display: flex; flex-direction: column;
+              align-items: center; gap: 1px; pointer-events: none; text-shadow: 0 0 6px var(--bg), 0 0 2px var(--bg); }
+.zone-label b { font-size: 11px; font-weight: 600; letter-spacing: 0.16em; color: var(--brk); }
+.zone-label span { font: 10.5px var(--mono); color: var(--muted); }
 .lens { position: absolute; border-radius: 50%; overflow: hidden; padding: 0; border: 1.5px solid var(--sun);
         background: var(--bg); }
 .lens img { position: absolute; inset: 0; width: 100%; height: 100%; }
