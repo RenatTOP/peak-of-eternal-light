@@ -244,6 +244,10 @@ class SfsRegion:
     def elev(self) -> Path:
         return self.product("ELEV")
 
+    def slope(self, baseline_m: int = 10) -> Path:
+        """Slope over baseline_m (5, 10, 20, 50, 100, 200, 400, 800, 1600 m)."""
+        return self.dir / "SLOPE_MAPS" / f"{self.prefix}_GLDTSLP_005_{baseline_m:03d}.tif"
+
     @property
     def available(self) -> bool:
         return self.elev.exists()
