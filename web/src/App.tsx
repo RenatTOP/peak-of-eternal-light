@@ -1,31 +1,31 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { ComparePanel } from "./components/ComparePanel";
-import { PolarMap, pickedLabel, type OverlayKey } from "./components/PolarMap";
-import { SitePanel, type PanelSite } from "./components/SitePanel";
-import { analyze, computeSeries, xyToLatLon, type Analysis, type Horizon, type Observer } from "./lib/astro";
-import { loadAppData, type AppData, type SiteInfo } from "./lib/data";
-import { autoStepMs, DAY_MS, fmtDate } from "./lib/format";
-import type { GridPoint } from "./lib/grid";
+import { Boot, Header, MobileNav, TimeBar, type Tab } from "./components/Chrome";
+import { ComparePage, type CompareRow } from "./components/ComparePage";
+import { Globe } from "./components/Globe";
+import { Head, Panel } from "./components/hud";
+import { MethodPage } from "./components/MethodPage";
+import { PolarMap, type OverlayKey } from "./components/PolarMap";
+import { ResultPanel } from "./components/ResultPanel";
+import { SiteCard, type ListRow } from "./components/SiteCard";
+import type { PointHorizon } from "./lib/anypoint";
+import { analyze, computeSeries, latLonToXY, xyToLatLon, type Analysis, type Horizon, type Observer } from "./lib/astro";
+import { loadAppData, type AppData, type LoadStep, type SiteInfo } from "./lib/data";
+import { autoStepMs, DAY_MS, fmtLat, fmtLon } from "./lib/format";
+import { T } from "./lib/theme";
 
-const PRESETS: [string, number][] = [
-  ["14 days", 14],
-  ["1 lunar day", 29.53],
-  ["3 months", 91],
-  ["1 year", 365],
-  ["5 years", 5 * 365.25],
-];
-
-const BADGE: Record<string, string | undefined> = { mission: "mission", psr: "permanent shadow" };
+type Vec3 = [number, number, number];
 
 function run(data: AppData, obs: Observer, horizon: Horizon, start: number, days: number): Analysis {
   const end = Math.min(start + days * DAY_MS, data.ephem.end);
   return analyze(computeSeries(data.ephem, obs, horizon, start, end, autoStepMs(days)));
 }
 
-function siteObserver(s: SiteInfo): Observer {
-  return { lat: s.lat, lon: s.lon, elevM: s.ground_z + s.horizon_height_m };
-}
+const siteObserver = (s: SiteInfo): Observer => ({ lat: s.lat, lon: s.lon, elevM: s.ground_z + s.horizon_height_m });
+
+const KIND: Record<string, [string, string]> = {
+  candidate: ["Candidate site", T.sun], mission: ["Landed mission", T.earth], psr: ["Permanent shadow", T.psr],
+};
 
 interface Picked {
   x: number;
@@ -33,179 +33,228 @@ interface Picked {
   lat: number;
   lon: number;
   status: "loading" | "ok" | "outside";
-  point?: GridPoint;
+  point?: PointHorizon;
+}
+
+function unit(v: Vec3): Vec3 {
+  const n = Math.hypot(v[0], v[1], v[2]);
+  return [v[0] / n, v[1] / n, v[2] / n];
+}
+
+function periodLabel(start: number, days: number): string {
+  const d0 = new Date(start).toISOString().slice(0, 10);
+  const d1 = new Date(start + days * DAY_MS).toISOString().slice(0, 10);
+  return `${d0} → ${d1}`;
 }
 
 export default function App() {
   const [data, setData] = useState<AppData | null>(null);
+  const [loaded, setLoaded] = useState<Set<LoadStep>>(new Set());
   const [error, setError] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>("connecting-ridge");
+  const [tab, setTab] = useState<Tab>("explore");
+  const [stage, setStage] = useState<"globe" | "map">("globe");
+  const [selectedId, setSelectedId] = useState<string>("connecting-ridge");
   const [picked, setPicked] = useState<Picked | null>(null);
   const [start, setStart] = useState(() => Date.UTC(2027, 0, 1));
   const [days, setDays] = useState(365);
   const [cursor, setCursor] = useState(0);
-  const [tab, setTab] = useState<"site" | "compare">("site");
+  const [playing, setPlaying] = useState(false);
   const [overlays, setOverlays] = useState<Record<OverlayKey, boolean>>({ sun: false, earth: false, psr: false });
 
   useEffect(() => {
-    loadAppData().then(setData).catch((e) => setError(String(e)));
+    loadAppData((s) => setLoaded((prev) => new Set(prev).add(s))).then(setData).catch((e) => setError(String(e)));
   }, []);
 
-  // --- any point: horizon from the grid
-  const pick = (x: number, y: number) => {
+  // --- all catalog sites over the period (ranking, compare, marker colours)
+  const rows = useMemo((): CompareRow[] => {
+    if (!data) return [];
+    return data.sites.map((site) => ({ site, analysis: run(data, siteObserver(site), data.horizons.get(site.id)!, start, days) }));
+  }, [data, start, days]);
+  const byId = useMemo(() => new Map(rows.map((r) => [r.site.id, r.analysis])), [rows]);
+  const sunPctById = useMemo(() => Object.fromEntries(rows.map((r) => [r.site.id, r.analysis.metrics.sunMeanPct])), [rows]);
+
+  const selected = data?.sites.find((s) => s.id === selectedId) ?? null;
+
+  // --- what the panels show: a catalog site or any point
+  const view = useMemo(() => {
+    if (!data) return null;
+    if (picked?.status === "ok" && picked.point) {
+      const p = picked.point;
+      return {
+        what: "point" as const, horizon: p.horizon,
+        analysis: run(data, { lat: picked.lat, lon: picked.lon, elevM: p.groundZ + p.heightM }, p.horizon, start, days),
+      };
+    }
+    if (!selected) return null;
+    return { what: "site" as const, horizon: data.horizons.get(selected.id)!, analysis: byId.get(selected.id)! };
+  }, [data, picked, selected, byId, start, days]);
+
+  useEffect(() => setCursor(0), [selectedId, picked, start, days]);
+
+  // --- playback: the period runs in about 20 seconds
+  const n = view?.analysis.series.t.length ?? 0;
+  useEffect(() => {
+    if (!playing || !n) return;
+    let raf = 0;
+    const step = Math.max(1, n / 1200);
+    let acc = 0;
+    const tick = () => {
+      acc += step;
+      const d = Math.floor(acc);
+      acc -= d;
+      setCursor((c) => {
+        if (c + d >= n - 1) {
+          setPlaying(false);
+          return n - 1;
+        }
+        return c + d;
+      });
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [playing, n]);
+
+  const clock = view ? view.analysis.series.t[Math.min(cursor, n - 1)] : null;
+  const dirs = useMemo(() => {
+    if (!data) return { sun: [1, 0, 0] as Vec3, earth: [1, 0, 0] as Vec3 };
+    const t = clock ?? start;
+    return { sun: unit(data.ephem.position(0, t)), earth: unit(data.ephem.position(1, t)) };
+  }, [data, clock, start]);
+
+  // --- actions
+  const openSite = (id: string) => {
+    setSelectedId(id);
+    setPicked(null);
+    setTab("explore");
+    setStage("map");
+  };
+  const pickXY = (x: number, y: number) => {
     if (!data) return;
     const [lat, lon] = xyToLatLon(x, y);
     const base = { x, y, lat, lon };
-    setSelectedId(null);
-    setTab("site");
-    if (lat > -60 || !data.grid) {
+    setTab("explore");
+    setStage("map");
+    setPlaying(false);
+    if (lat > -60 || !data.anyPoint) {
       setPicked({ ...base, status: "outside" });
       return;
     }
     setPicked({ ...base, status: "loading" });
-    data.grid.at(x, y).then((point) =>
-      setPicked((cur) => (cur && cur.x === x && cur.y === y
-        ? { ...base, status: point ? "ok" : "outside", point: point ?? undefined } : cur)));
+    data.anyPoint.horizon(x, y).then(
+      (point) => setPicked((cur) => (cur && cur.x === x && cur.y === y
+        ? { ...base, status: point ? "ok" : "outside", point: point ?? undefined } : cur)),
+      () => setPicked((cur) => (cur && cur.x === x && cur.y === y ? { ...base, status: "outside" } : cur)),
+    );
+  };
+  const pickLatLon = (lat: number, lon: number) => {
+    const [x, y] = latLonToXY(lat, lon);
+    pickXY(x, y);
   };
 
-  const rows = useMemo(() => {
-    if (!data) return [];
-    return data.sites.map((site) => ({
-      site, m: run(data, siteObserver(site), data.horizons.get(site.id)!, start, days).metrics,
-    }));
-  }, [data, start, days]);
+  if (!data) return <Boot done={loaded} error={error} />;
 
-  const sunPctById = useMemo(
-    () => Object.fromEntries(rows.map((r) => [r.site.id, r.m.sunMeanPct])), [rows]);
+  const nearest = picked ? [...data.sites].map((s) => ({ s, d: Math.hypot(s.x - picked.x, s.y - picked.y) })).sort((a, b) => a.d - b.d) : [];
+  const m = view?.analysis.metrics;
 
-  const selected = data?.sites.find((s) => s.id === selectedId) ?? null;
-
-  const view = useMemo((): { site: PanelSite; horizon: Horizon; analysis: Analysis } | null => {
-    if (!data) return null;
-    if (picked?.status === "ok" && picked.point) {
+  // --- left panel
+  let left = null;
+  if (view && m) {
+    if (view.what === "point" && picked?.point) {
       const p = picked.point;
-      const nearest = [...data.sites].map((s) => ({ s, d: Math.hypot(s.x - picked.x, s.y - picked.y) }))
-        .sort((a, b) => a.d - b.d)[0];
-      return {
-        horizon: p.horizon,
-        analysis: run(data, { lat: picked.lat, lon: picked.lon, elevM: p.groundZ + p.heightM },
-                      p.horizon, start, days),
-        site: {
-          id: "picked", name: "Selected point", lat: picked.lat, lon: picked.lon, groundZ: p.groundZ,
-          demSource: p.zone === "inner" ? "r40" : "r120", heightM: p.heightM,
-          caveat: `Preview: horizon interpolated from a ${p.spacingM / 1000} km grid (${p.dem}). ` +
-            `Local terrain within a few hundred metres can change lighting a lot — catalog sites use 5 m terrain. ` +
-            `Nearest catalog site: ${nearest.s.name}, ${(nearest.d / 1000).toFixed(1)} km.`,
-        },
-      };
+      const list: ListRow[] = nearest.slice(0, 4).map(({ s, d }) => ({
+        id: s.id, name: s.name, pct: sunPctById[s.id] ?? 0, extra: `${(d / 1000).toFixed(1)} km`, on: false,
+      }));
+      left = (
+        <SiteCard title="Selected point" kind="Selected point" kindColor={T.text}
+                  coords={`${fmtLat(picked.lat)} ${fmtLon(picked.lon)} · ${Math.round(p.groundZ)} m`}
+                  notice={`Computed for this exact spot: terrain within ${Math.round(p.nearRadiusM / 1000)} km from ${p.nearDem}, ` +
+                    `distant mountains from a ${p.farSpacingM / 1000} km grid. Catalog sites use 5 m terrain, so small ridges and boulders may be missing here.`}
+                  metrics={m} periodDays={days} listTitle="NEAREST SITES" list={list}
+                  onSelect={openSite} onCompare={() => setTab("compare")} compareCount={data.sites.length} />
+      );
+    } else if (selected) {
+      const ranked = [...rows].sort((a, b) => b.analysis.metrics.sunMeanPct - a.analysis.metrics.sunMeanPct);
+      let top = ranked.slice(0, 8);
+      if (!top.some((r) => r.site.id === selected.id)) top = [...top.slice(0, 7), ranked.find((r) => r.site.id === selected.id)!];
+      const [kind, kcol] = KIND[selected.group];
+      left = (
+        <SiteCard title={selected.name} kind={kind} kindColor={kcol}
+                  coords={`${fmtLat(selected.lat)} ${fmtLon(selected.lon)} · ${Math.round(selected.ground_z)} m`}
+                  note={selected.note} metrics={m} periodDays={days} listTitle="SITES · SOLAR ENERGY"
+                  list={top.map((r) => ({ id: r.site.id, name: r.site.name, pct: r.analysis.metrics.sunMeanPct, on: r.site.id === selected.id }))}
+                  onSelect={openSite} onCompare={() => setTab("compare")} compareCount={data.sites.length} />
+      );
     }
-    if (!selected) return null;
-    const horizon = data.horizons.get(selected.id)!;
-    return {
-      horizon,
-      analysis: run(data, siteObserver(selected), horizon, start, days),
-      site: {
-        id: selected.id, name: selected.name, lat: selected.lat, lon: selected.lon,
-        groundZ: selected.ground_z, demSource: selected.ground_source, heightM: selected.horizon_height_m,
-        note: selected.note, badge: BADGE[selected.group],
-      },
-    };
-  }, [data, picked, selected, start, days]);
+  }
 
-  useEffect(() => setCursor(0), [selectedId, picked, start, days]);
+  const timebar = (
+    <TimeBar start={start} days={days} min={data.ephem.start} max={data.ephem.end - 14 * DAY_MS}
+             onStart={setStart} onDays={setDays} series={view?.analysis.series ?? null}
+             cursor={cursor} onCursor={(i) => { setPlaying(false); setCursor(i); }}
+             playing={playing} onPlay={() => setPlaying((p) => !p)} />
+  );
 
-  if (error) return <div className="fatal">Failed to load data: {error}</div>;
-  if (!data) return <div className="loading">Loading ephemerides and terrain horizons…</div>;
+  const card = picked && picked.status !== "ok" && (
+    <div className="stage-card">
+      <Panel>
+        <Head label={picked.status === "loading" ? "TRACING THE HORIZON" : "OUTSIDE COVERAGE"} />
+        {picked.status === "loading" ? (
+          <>
+            <h3>{fmtLat(picked.lat)} {fmtLon(picked.lon)}</h3>
+            <p>Loading terrain around the point and tracing 720 directions…</p>
+          </>
+        ) : (
+          <>
+            <h3>This spot is outside our terrain model</h3>
+            <p className="mono">{fmtLat(picked.lat)} {fmtLon(picked.lon)}</p>
+            <p>The model covers the south polar region from 60°S to the pole. Pick a point closer to the pole, or open a catalog site.</p>
+            <div className="btn-row">
+              <button className="btn primary" onClick={() => { setPicked(null); setStage("map"); }}>Back to the pole</button>
+              <button className="btn" onClick={() => { setPicked(null); setTab("compare"); }}>Browse sites</button>
+            </div>
+          </>
+        )}
+      </Panel>
+    </div>
+  );
 
-  const minDate = fmtDate(data.ephem.start);
-  const maxDate = fmtDate(data.ephem.end - 14 * DAY_MS);
-
+  const mSel = selected && byId.get(selected.id)?.metrics;
   return (
     <div className="app">
-      <header className="topbar">
-        <div className="brand">
-          <img src="favicon.svg" alt="" />
-          <div>
-            <h1>Peak of Eternal Light</h1>
-            <div className="muted small">Lunar south pole mission browser · Sun and Earth above the real terrain</div>
+      <Header tab={tab} onTab={setTab} clock={clock} />
+      {tab === "explore" && (
+        <main className="explore">
+          {left}
+          <div className="stage">
+            {stage === "globe" ? (
+              <Globe data={data} selectedId={picked ? null : selectedId} sunPctById={sunPctById}
+                     sunDir={dirs.sun} earthDir={dirs.earth} onPick={pickLatLon} onZoomPole={() => setStage("map")} />
+            ) : (
+              <PolarMap data={data} selectedId={picked ? null : selectedId} sunPctById={sunPctById}
+                        selectedTag={selected && mSel ? { title: selected.name.toUpperCase(),
+                          line: `${mSel.sunMeanPct.toFixed(0)}% sun · ${mSel.earthPct.toFixed(0)}% Earth` } : null}
+                        overlays={overlays} onToggleOverlay={(k) => setOverlays((o) => ({ ...o, [k]: !o[k] }))}
+                        onSelect={openSite} onPick={pickXY} onGlobe={() => setStage("globe")}
+                        picked={picked && { x: picked.x, y: picked.y }}
+                        pickedTag={picked ? { title: "SELECTED POINT", line: `${fmtLat(picked.lat)} ${fmtLon(picked.lon)}` } : null}
+                        pickedLink={picked?.status === "ok" && nearest[0] ? { x: nearest[0].s.x, y: nearest[0].s.y } : null} />
+            )}
+            {card}
           </div>
-        </div>
-        <div className="controls">
-          <label>
-            Start (UTC)
-            <input type="date" value={fmtDate(start)} min={minDate} max={maxDate}
-                   onChange={(e) => e.target.value && setStart(Date.parse(e.target.value + "T00:00:00Z"))} />
-          </label>
-          <div className="presets">
-            {PRESETS.map(([label, d]) => (
-              <button key={label} className={Math.abs(d - days) < 0.01 ? "active" : ""} onClick={() => setDays(d)}>
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-      </header>
-
-      <main className="layout">
-        <div className="map-wrap">
-          <PolarMap data={data} selectedId={selectedId} sunPctById={sunPctById} overlays={overlays}
-                    picked={picked && { x: picked.x, y: picked.y }}
-                    onSelect={(id) => { setSelectedId(id); setPicked(null); setTab("site"); }}
-                    onPick={pick} />
-          <div className="map-ui">
-            <div className="layer-toggles">
-              {([["sun", "Avg. sunlight"], ["earth", "Avg. Earth view"], ["psr", "Permanent shadow"]] as const)
-                .map(([k, label]) => (
-                  <button key={k} className={overlays[k] ? "active" : ""}
-                          onClick={() => setOverlays((o) => ({ ...o, [k]: !o[k] }))}>{label}</button>
-                ))}
-            </div>
-            <div className="legend">
-              <span>Solar energy, selected period</span>
-              <div className="legend-bar" />
-              <div className="legend-ticks"><span>0%</span><span>50%</span><span>100%</span></div>
-            </div>
-            <div className="near-side">↑ toward Earth (near side)</div>
-          </div>
-          <div className="map-hint">Click anywhere south of 60°S to analyse that spot</div>
-          {picked && picked.status !== "ok" && (
-            <div className="picked-card">
-              <button className="close" onClick={() => setPicked(null)}>×</button>
-              <b>{pickedLabel(picked.x, picked.y)}</b>
-              <p className="small">
-                {picked.status === "loading" ? "Loading terrain horizon…" : "Outside terrain coverage (60–90°S)."}
-              </p>
-            </div>
-          )}
-        </div>
-
-        <aside className="panel">
-          <div className="tabs main-tabs">
-            <button className={tab === "site" ? "active" : ""} onClick={() => setTab("site")}>
-              {picked?.status === "ok" ? "Selected point" : "Site"}
-            </button>
-            <button className={tab === "compare" ? "active" : ""} onClick={() => setTab("compare")}>
-              Compare all ({rows.length})
-            </button>
-          </div>
-          {tab === "site" && view && (
-            <SitePanel site={view.site} horizon={view.horizon} analysis={view.analysis}
-                       cursor={cursor} onCursor={setCursor} />
-          )}
-          {tab === "site" && !view && (
-            <p className="muted">Select a site on the map or click anywhere to analyse a point.</p>
-          )}
-          {tab === "compare" && (
-            <ComparePanel rows={rows} selectedId={selectedId}
-                          onSelect={(id) => { setSelectedId(id); setPicked(null); setTab("site"); }} />
-          )}
-          <footer className="credits muted small">
-            Terrain: LOLA/LRO (Barker et al. 2021, 2023), Shape-from-Shading (Bertone et al.).
-            Ephemerides: NAIF SPICE DE440. Validated against NASA average illumination maps
-            (Mazarico et al.): r = 0.995.
-          </footer>
-        </aside>
-      </main>
+          {view && <ResultPanel what={view.what} horizon={view.horizon} analysis={view.analysis} cursor={cursor}
+                                onCursor={(i) => { setPlaying(false); setCursor(i); }} />}
+          {timebar}
+        </main>
+      )}
+      {tab === "compare" && (
+        <main className="compare">
+          <ComparePage rows={rows} selectedId={selectedId} onOpen={openSite} period={periodLabel(start, days)} />
+          {timebar}
+        </main>
+      )}
+      {tab === "method" && <MethodPage />}
+      <MobileNav tab={tab} onTab={setTab} />
     </div>
   );
 }

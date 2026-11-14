@@ -1,21 +1,33 @@
+// Working polar map (Leaflet in polar stereographic metres).
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { latLonToXY, xyToLatLon } from "../lib/astro";
-import { DATA_URL, type AppData, type Bounds, type SiteInfo } from "../lib/data";
+import { DATA_URL, type AppData, type Bounds } from "../lib/data";
 import { fmtLat, fmtLon } from "../lib/format";
+import { T, sunAlpha } from "../lib/theme";
 
 export type OverlayKey = "sun" | "earth" | "psr";
+
+export interface MapTag {
+  title: string;
+  line: string;
+}
 
 interface Props {
   data: AppData;
   selectedId: string | null;
+  selectedTag: MapTag | null;
   sunPctById: Record<string, number>;
   overlays: Record<OverlayKey, boolean>;
+  onToggleOverlay: (k: OverlayKey) => void;
   onSelect: (id: string) => void;
   onPick: (x: number, y: number) => void;
+  onGlobe: () => void;
   picked: { x: number; y: number } | null;
+  pickedTag: MapTag | null;
+  pickedLink: { x: number; y: number } | null; // nearest catalog site
 }
 
 /** Leaflet in polar stereographic metres: LatLng = (y, x). */
@@ -27,35 +39,28 @@ function polarCRS(halfWidth: number): L.CRS {
 const ll = (x: number, y: number) => L.latLng(y, x);
 const llBounds = (b: Bounds) => L.latLngBounds(ll(b[0], b[1]), ll(b[2], b[3]));
 
-export function sunColor(pct: number): string {
-  // dark violet -> red -> orange -> light yellow
-  const stops: [number, [number, number, number]][] = [
-    [0, [70, 40, 120]], [30, [200, 60, 70]], [60, [245, 150, 30]], [100, [255, 240, 150]],
-  ];
-  for (let i = 1; i < stops.length; i++) {
-    if (pct <= stops[i][0]) {
-      const [p0, c0] = stops[i - 1];
-      const [p1, c1] = stops[i];
-      const w = (pct - p0) / (p1 - p0);
-      const c = c0.map((v, k) => Math.round(v + (c1[k] - v) * w));
-      return `rgb(${c[0]},${c[1]},${c[2]})`;
-    }
-  }
-  return "rgb(255,240,150)";
-}
+const reticle = (color: string, size = 34) => L.divIcon({
+  className: "", iconSize: [size, size], iconAnchor: [size / 2, size / 2],
+  html: `<div class="reticle" style="width:${size}px;height:${size}px;color:${color}"><i></i><i></i><i></i><i></i><b></b></div>`,
+});
+
+const tagIcon = (tag: MapTag, color: string) => L.divIcon({
+  className: "", iconSize: undefined, iconAnchor: [-26, 22],
+  html: `<div class="tag" style="color:${color}"><b>${tag.title}</b><span>${tag.line}</span></div>`,
+});
 
 function graticule(layer: L.LayerGroup) {
-  const style = { color: "#8fa3c8", weight: 0.6, opacity: 0.35, interactive: false };
-  for (const lat of [-89, -88, -87, -86, -85, -84, -82, -80, -75, -70, -65, -60]) {
+  const style = { color: T.bracket, weight: 1, opacity: 0.18, interactive: false };
+  for (const lat of [-89.5, -89, -88.5, -88, -87, -86, -85, -84, -82, -80, -75, -70, -65, -60]) {
     const pts = Array.from({ length: 181 }, (_, i) => {
       const [x, y] = latLonToXY(lat, i * 2);
       return ll(x, y);
     });
     L.polyline(pts, style).addTo(layer);
-    const [lx, ly] = latLonToXY(lat, 45);
+    const [lx, ly] = latLonToXY(lat, 300);
     L.marker(ll(lx, ly), {
       interactive: false,
-      icon: L.divIcon({ className: "grat-label", html: `${Math.abs(lat)}°S`, iconSize: [40, 14] }),
+      icon: L.divIcon({ className: "grat-label", html: `${Math.abs(lat)}°S`, iconSize: [44, 14], iconAnchor: [22, 12] }),
     }).addTo(layer);
   }
   for (let lon = 0; lon < 360; lon += 30) {
@@ -64,76 +69,87 @@ function graticule(layer: L.LayerGroup) {
   }
 }
 
-export function PolarMap({ data, selectedId, sunPctById, overlays, onSelect, onPick, picked }: Props) {
+/** Round scale bar length (≤ maxPx) for a given metres per pixel. */
+function niceScale(mPerPx: number, maxPx = 110): [number, number] {
+  const raw = mPerPx * maxPx;
+  const p = Math.pow(10, Math.floor(Math.log10(raw)));
+  const m = [5, 2, 1].map((k) => k * p).find((v) => v <= raw) ?? p;
+  return [m, m / mPerPx];
+}
+
+export function PolarMap(props: Props) {
+  const { data, selectedId, selectedTag, sunPctById, overlays, picked, pickedTag, pickedLink } = props;
   const el = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
   const markers = useRef<Map<string, L.CircleMarker>>(new Map());
+  const labels = useRef<L.LayerGroup | null>(null);
   const overlayLayers = useRef<Record<OverlayKey, L.LayerGroup> | null>(null);
-  const closeup = useRef<L.ImageOverlay | null>(null);
-  const pickMarker = useRef<L.CircleMarker | null>(null);
-  const handlers = useRef({ onSelect, onPick });
-  handlers.current = { onSelect, onPick };
+  const focus = useRef<L.LayerGroup | null>(null);
+  const handlers = useRef(props);
+  handlers.current = props;
+  const [scale, setScale] = useState<[number, number]>([10_000, 100]);
+  const [mouse, setMouse] = useState<[number, number] | null>(null);
 
-  // --- map creation (once)
+  // --- map (once)
   useEffect(() => {
     if (!el.current || map.current) return;
     const W = data.map.world_half_m;
+    const a = 256 / (2 * W);
     const m = L.map(el.current, {
-      crs: polarCRS(W),
-      center: ll(0, 0),
-      zoom: 3,
-      minZoom: 1,
-      maxZoom: 11,
-      zoomSnap: 0.5,
-      attributionControl: true,
-      preferCanvas: true,
+      crs: polarCRS(W), center: ll(-8000, -3000), zoom: 6, minZoom: 1, maxZoom: 11, zoomSnap: 0.5,
+      zoomControl: false, attributionControl: true, preferCanvas: true,
     });
     m.attributionControl.setPrefix(false);
-    m.attributionControl.addAttribution("LOLA/LRO (NASA GSFC), SfS: Bertone et al., illumination: Mazarico et al.");
-
+    m.attributionControl.addAttribution("LOLA/LRO (NASA GSFC) · SfS: Bertone et al. · illumination: Mazarico et al.");
     L.tileLayer(DATA_URL("tiles/base/{z}/{x}/{y}.jpg"), {
-      maxNativeZoom: data.map.base_max_zoom, maxZoom: 11, noWrap: true,
-      bounds: L.latLngBounds(ll(-W, -W), ll(W, W)), className: "tiles-base",
+      maxNativeZoom: data.map.base_max_zoom, maxZoom: 11, noWrap: true, bounds: L.latLngBounds(ll(-W, -W), ll(W, W)),
     }).addTo(m);
     const D = data.map.detail_half_m;
     L.tileLayer(DATA_URL("tiles/detail/{z}/{x}/{y}.jpg"), {
       minNativeZoom: data.map.detail_zooms[0], maxNativeZoom: data.map.detail_zooms.at(-1),
-      minZoom: data.map.detail_zooms[0], maxZoom: 11, noWrap: true,
-      bounds: L.latLngBounds(ll(-D, -D), ll(D, D)), className: "tiles-detail",
+      minZoom: data.map.detail_zooms[0], maxZoom: 11, noWrap: true, bounds: L.latLngBounds(ll(-D, -D), ll(D, D)),
     }).addTo(m);
-
-    const grat = L.layerGroup().addTo(m);
-    graticule(grat);
+    graticule(L.layerGroup().addTo(m));
 
     const ov = (keys: string[]) => {
       const g = L.layerGroup();
       for (const k of keys) {
         const o = data.overlays[k];
-        if (o) L.imageOverlay(DATA_URL(o.file), llBounds(o.bounds), { opacity: 0.85, interactive: false }).addTo(g);
+        if (o) L.imageOverlay(DATA_URL(o.file), llBounds(o.bounds), { opacity: 0.75, interactive: false }).addTo(g);
       }
       return g;
     };
-    overlayLayers.current = {
-      sun: ov(["sun_75S", "sun_85S"]),
-      earth: ov(["earth_75S", "earth_85S"]),
-      psr: ov(["psr_80S"]),
-    };
+    overlayLayers.current = { sun: ov(["sun_75S", "sun_85S"]), earth: ov(["earth_75S", "earth_85S"]), psr: ov(["psr_80S"]) };
+    labels.current = L.layerGroup();
+    focus.current = L.layerGroup().addTo(m);
 
+    const onZoom = () => {
+      setScale(niceScale(1 / (a * Math.pow(2, m.getZoom()))));
+      const lg = labels.current!;
+      if (m.getZoom() >= 5.5) lg.addTo(m);
+      else lg.remove();
+    };
+    m.on("zoomend", onZoom);
+    onZoom();
     m.on("click", (e: L.LeafletMouseEvent) => handlers.current.onPick(e.latlng.lng, e.latlng.lat));
-    L.control.scale({ imperial: false, position: "bottomleft" }).addTo(m);
+    let raf = 0;
+    m.on("mousemove", (e: L.LeafletMouseEvent) => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => setMouse([e.latlng.lng, e.latlng.lat]));
+    });
+    m.on("mouseout", () => setMouse(null));
     map.current = m;
     return () => {
-      // layers are bound to this map: StrictMode creates it twice
       m.remove();
       map.current = null;
       markers.current.clear();
       overlayLayers.current = null;
-      closeup.current = null;
-      pickMarker.current = null;
+      labels.current = null;
+      focus.current = null;
     };
   }, [data]);
 
-  // --- overlays
+  // --- layers
   useEffect(() => {
     const m = map.current;
     const layers = overlayLayers.current;
@@ -144,74 +160,105 @@ export function PolarMap({ data, selectedId, sunPctById, overlays, onSelect, onP
     }
   }, [overlays]);
 
-  // --- site markers
+  // --- catalog site markers and labels
   useEffect(() => {
     const m = map.current;
-    if (!m) return;
+    const lg = labels.current;
+    if (!m || !lg) return;
+    lg.clearLayers();
     for (const site of data.sites) {
       let mk = markers.current.get(site.id);
       if (!mk) {
-        mk = L.circleMarker(ll(site.x, site.y), { radius: 7, weight: 2 })
+        mk = L.circleMarker(ll(site.x, site.y), { radius: 5 })
           .on("click", (e) => {
             L.DomEvent.stopPropagation(e);
             handlers.current.onSelect(site.id);
           })
-          .bindTooltip(tooltip(site), { direction: "top", offset: [0, -6] })
+          .bindTooltip(site.name, { direction: "top", offset: [0, -6] })
           .addTo(m);
         markers.current.set(site.id, mk);
       }
-      const pct = sunPctById[site.id];
-      const sel = site.id === selectedId;
+      const pct = sunPctById[site.id] ?? 0;
+      const mission = site.group === "mission";
+      const psr = site.group === "psr";
       mk.setStyle({
-        color: sel ? "#ffffff" : site.group === "mission" ? "#6fd3ff" : "#1b2336",
-        fillColor: pct === undefined ? "#888" : sunColor(pct),
-        fillOpacity: 0.95,
-        radius: sel ? 10 : site.group === "psr" ? 6 : 7,
-        weight: sel ? 3 : 2,
+        color: mission ? T.earth : T.bg, weight: mission ? 2 : 2,
+        fillColor: mission ? T.bg : psr ? T.psr : T.sun,
+        fillOpacity: mission ? 0.9 : psr ? 1 : sunAlpha(pct), radius: mission ? 5.5 : 5,
       });
-      if (sel) mk.bringToFront();
+      if (site.id !== selectedId) {
+        L.marker(ll(site.x, site.y), {
+          interactive: false,
+          icon: L.divIcon({
+            className: "", iconSize: undefined, iconAnchor: [-10, 9],
+            html: `<div class="site-label">${site.name}${site.group === "candidate" ? `<b>${Math.round(pct)}%</b>` : ""}</div>`,
+          }),
+        }).addTo(lg);
+      }
     }
   }, [data, sunPctById, selectedId]);
 
-  // --- close-up and fly-to for the chosen point
+  // --- chosen catalog site or any point: crosshair, label, close-up
   useEffect(() => {
     const m = map.current;
-    if (!m) return;
-    closeup.current?.remove();
-    closeup.current = null;
+    const f = focus.current;
+    if (!m || !f) return;
+    f.clearLayers();
     const site = data.sites.find((s) => s.id === selectedId);
-    if (!site) return;
-    const c = data.closeups[site.id];
-    if (c) {
-      closeup.current = L.imageOverlay(DATA_URL(c.file), llBounds(c.bounds), {
-        opacity: 1, interactive: false, className: "closeup",
-      }).addTo(m);
-      closeup.current.bringToBack();
+    if (site && !picked) {
+      const c = data.closeups[site.id];
+      if (c) L.imageOverlay(DATA_URL(c.file), llBounds(c.bounds), { opacity: 0.92, interactive: false }).addTo(f).bringToBack();
+      if (c) L.rectangle(llBounds(c.bounds), { color: T.sun, weight: 1, opacity: 0.5, fill: false, interactive: false }).addTo(f);
+      L.marker(ll(site.x, site.y), { icon: reticle(T.sun), interactive: false }).addTo(f);
+      if (selectedTag) L.marker(ll(site.x, site.y), { icon: tagIcon(selectedTag, T.sun), interactive: false }).addTo(f);
+      m.flyTo(ll(site.x, site.y), Math.max(m.getZoom(), 7), { duration: 0.8 });
     }
-    m.flyTo(ll(site.x, site.y), Math.max(m.getZoom(), 7), { duration: 0.8 });
-  }, [data, selectedId]);
-
-  // --- any point
-  useEffect(() => {
-    const m = map.current;
-    if (!m) return;
-    pickMarker.current?.remove();
-    pickMarker.current = null;
     if (picked) {
-      pickMarker.current = L.circleMarker(ll(picked.x, picked.y), {
-        radius: 8, color: "#ffffff", weight: 2, fillColor: "#39d98a", fillOpacity: 0.9, interactive: false,
-      }).addTo(m);
+      if (pickedLink) {
+        L.polyline([ll(picked.x, picked.y), ll(pickedLink.x, pickedLink.y)],
+                   { color: T.text, weight: 1, opacity: 0.45, dashArray: "3 4", interactive: false }).addTo(f);
+      }
+      L.marker(ll(picked.x, picked.y), { icon: reticle(T.text), interactive: false }).addTo(f);
+      if (pickedTag) L.marker(ll(picked.x, picked.y), { icon: tagIcon(pickedTag, T.text), interactive: false }).addTo(f);
+      if (!m.getBounds().pad(-0.1).contains(ll(picked.x, picked.y))) m.panTo(ll(picked.x, picked.y));
     }
-  }, [picked]);
+  }, [data, selectedId, selectedTag, picked, pickedTag, pickedLink]);
 
-  return <div ref={el} className="polar-map" />;
-}
+  const zoom = (d: number) => map.current?.setZoom((map.current.getZoom() ?? 6) + d);
+  const mouseLL = mouse && xyToLatLon(mouse[0], mouse[1]);
+  const CHIPS: [OverlayKey, string, string][] = [["sun", "Mean sunlight", T.sun], ["earth", "Earth visibility", T.earth], ["psr", "Permanent shadow", T.psr]];
 
-function tooltip(site: SiteInfo): string {
-  return `<b>${site.name}</b><br>${fmtLat(site.lat)} ${fmtLon(site.lon)} · ${Math.round(site.ground_z)} m`;
-}
-
-export function pickedLabel(x: number, y: number): string {
-  const [lat, lon] = xyToLatLon(x, y);
-  return `${fmtLat(lat)} ${fmtLon(lon)}`;
+  return (
+    <>
+      <div ref={el} className="polar-map" />
+      <div className="map-frame" style={{ pointerEvents: "none" }} />
+      <div className="map-tools">
+        <button className="tool" onClick={props.onGlobe}>
+          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+            <circle cx="7" cy="7" r="6" fill="none" stroke="currentColor" strokeWidth="1.2" />
+            <path d="M1 7 H13 M7 1 C3 4 3 10 7 13 M7 1 C11 4 11 10 7 13" fill="none" stroke="currentColor" />
+          </svg>
+          Globe
+        </button>
+        <button className="tool" aria-label="Zoom in" onClick={() => zoom(1)}>+</button>
+        <button className="tool" aria-label="Zoom out" onClick={() => zoom(-1)}>−</button>
+      </div>
+      <div className="map-earth">
+        EARTH
+        <svg width="10" height="12" viewBox="0 0 10 12" aria-hidden="true"><path d="M5 0 L10 7 L6 7 L6 12 L4 12 L4 7 L0 7 Z" fill={T.earth} /></svg>
+      </div>
+      <div className="chips">
+        {CHIPS.map(([k, label, col]) => (
+          <button key={k} className={`chip ${overlays[k] ? "on" : ""}`} aria-pressed={overlays[k]}
+                  style={overlays[k] ? { borderColor: col } : undefined} onClick={() => props.onToggleOverlay(k)}>
+            <i style={{ background: col }} />{label}
+          </button>
+        ))}
+      </div>
+      <div className="map-readout">
+        <div className="scale">{scale[0] >= 1000 ? `${scale[0] / 1000} km` : `${scale[0]} m`}<i style={{ width: scale[1] }} /></div>
+        <span style={{ color: T.muted }}>{mouseLL ? `${fmtLat(mouseLL[0])} ${fmtLon(mouseLL[1])}` : "click to analyse any spot"}</span>
+      </div>
+    </>
+  );
 }

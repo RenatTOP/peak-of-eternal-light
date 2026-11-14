@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 
-import { xyToLatLon } from "../lib/astro";
 import { DATA_URL, type AppData } from "../lib/data";
 import { T, sunAlpha } from "../lib/theme";
 
@@ -315,4 +314,3 @@ function GlobeOverlay({ ov, data, selectedId, onZoomPole }: {
   );
 }
 
-export { xyToLatLon };
