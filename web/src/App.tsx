@@ -55,6 +55,9 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("explore");
   const [stage, setStage] = useState<"globe" | "map">("globe");
+  // the map is created on first visit, then only hidden
+  const [mapSeen, setMapSeen] = useState(false);
+  if (stage === "map" && !mapSeen) setMapSeen(true);
   const [selectedId, setSelectedId] = useState<string>("connecting-ridge");
   const [picked, setPicked] = useState<Picked | null>(null);
   const [start, setStart] = useState(() => Date.UTC(2027, 0, 1));
@@ -223,16 +226,19 @@ export default function App() {
   return (
     <div className="app">
       <Header tab={tab} onTab={setTab} clock={clock} />
-      {tab === "explore" && (
-        <main className="explore">
-          {left}
-          <div className="stage">
-            {stage === "globe" ? (
-              <Suspense fallback={null}>
-                <Globe data={data} selectedId={picked ? null : selectedId} sunPctById={sunPctById}
-                       sunDir={dirs.sun} earthDir={dirs.earth} onPick={pickLatLon} onZoomPole={() => setStage("map")} />
-              </Suspense>
-            ) : (
+      {/* EXPLORE stays mounted on other pages: the globe (WebGL, ~8 MB of textures)
+          and the map stay ready instead of being rebuilt each time */}
+      <main className="explore" hidden={tab !== "explore"}>
+        {left}
+        <div className="stage">
+          <div className="stage-layer" hidden={stage !== "globe"}>
+            <Suspense fallback={null}>
+              <Globe data={data} selectedId={picked ? null : selectedId} sunPctById={sunPctById}
+                     sunDir={dirs.sun} earthDir={dirs.earth} onPick={pickLatLon} onZoomPole={() => setStage("map")} />
+            </Suspense>
+          </div>
+          {mapSeen && (
+            <div className="stage-layer" hidden={stage !== "map"}>
               <PolarMap data={data} selectedId={picked ? null : selectedId} sunPctById={sunPctById}
                         selectedTag={selected && mSel ? { title: selected.name.toUpperCase(),
                           line: `${mSel.sunMeanPct.toFixed(0)}% sun · ${mSel.earthPct.toFixed(0)}% Earth` } : null}
@@ -241,14 +247,14 @@ export default function App() {
                         picked={picked && { x: picked.x, y: picked.y }}
                         pickedTag={picked ? { title: "SELECTED POINT", line: `${fmtLat(picked.lat)} ${fmtLon(picked.lon)}` } : null}
                         pickedLink={picked?.status === "ok" && nearest[0] ? { x: nearest[0].s.x, y: nearest[0].s.y } : null} />
-            )}
-            {card}
-          </div>
-          {view && <ResultPanel what={view.what} horizon={view.horizon} analysis={view.analysis} cursor={cursor}
-                                onCursor={(i) => { setPlaying(false); setCursor(i); }} />}
-          {timebar}
-        </main>
-      )}
+            </div>
+          )}
+          {card}
+        </div>
+        {view && <ResultPanel what={view.what} horizon={view.horizon} analysis={view.analysis} cursor={cursor}
+                              onCursor={(i) => { setPlaying(false); setCursor(i); }} />}
+        {tab === "explore" && timebar}
+      </main>
       {tab === "compare" && (
         <main className="compare">
           <ComparePage rows={rows} selectedId={selectedId} onOpen={openSite} period={periodLabel(start, days)} />

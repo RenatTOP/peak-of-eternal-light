@@ -167,6 +167,7 @@ export function Globe({ data, selectedId, sunPctById, sunDir, earthDir, onPick, 
   const handlers = useRef({ onPick, onZoomPole });
   handlers.current = { onPick, onZoomPole };
   const [ov, setOv] = useState<Overlay | null>(null);
+  const [ready, setReady] = useState(false);
   const zoomed = useRef(false); // the user zoomed; don't refit to size
 
   // --- scene (once)
@@ -180,7 +181,11 @@ export function Globe({ data, selectedId, sunPctById, sunDir, earthDir, onPick, 
     const camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 100);
     camera.position.set(0, 0, DIST0);
 
-    const loader = new THREE.TextureLoader();
+    // show the scene once all textures load: no frame with black caps
+    const loader = new THREE.TextureLoader(new THREE.LoadingManager(() => {
+      setReady(true);
+      render();
+    }));
     const aniso = Math.min(8, renderer.capabilities.getMaxAnisotropy());
     const tex = (file: string, srgb: boolean) => {
       const t = loader.load(DATA_URL(file), () => render());
@@ -403,7 +408,8 @@ export function Globe({ data, selectedId, sunPctById, sunDir, earthDir, onPick, 
   }, []);
 
   return (
-    <div ref={wrap} className="stage-fill" style={{ position: "absolute", inset: 0 }}>
+    <div ref={wrap} className="stage-fill"
+         style={{ position: "absolute", inset: 0, opacity: ready ? 1 : 0, transition: "opacity 0.5s ease" }}>
       <canvas ref={canvas} className="globe-canvas" aria-label="The Moon seen from below its south pole. Drag to turn, scroll to zoom, click a spot south of 60°S to analyse it." />
       {ov && <GlobeOverlay ov={ov} data={data} selectedId={selectedId} onZoomPole={() => handlers.current.onZoomPole()} />}
     </div>

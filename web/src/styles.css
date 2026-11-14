@@ -128,6 +128,9 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 
 /* ---------------------------------------------------------------- centre */
 .stage { position: relative; min-height: 0; overflow: hidden; }
+.stage-layer { position: absolute; inset: 0; }
+/* hidden but not unmounted: the EXPLORE page and the stage layers (globe / map) */
+.explore[hidden], .stage-layer[hidden] { display: none !important; }
 .stage-hint { position: absolute; left: 8px; bottom: 6px; font-size: 12.5px; color: var(--muted); pointer-events: none; }
 .globe-canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: grab; }
 .globe-canvas:active { cursor: grabbing; }

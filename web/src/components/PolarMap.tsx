@@ -145,7 +145,15 @@ export function PolarMap(props: Props) {
     });
     m.on("mouseout", () => setMouse(null));
     map.current = m;
+    // the map stays mounted while the stage is hidden (globe, other pages); after showing
+    // Leaflet must re-read the container size, or tiles and clicks are offset
+    const ro = new ResizeObserver(() => {
+      // pan: true keeps the centre when the container appears from zero size
+      if (el.current && el.current.clientWidth > 0) m.invalidateSize({ animate: false });
+    });
+    ro.observe(el.current);
     return () => {
+      ro.disconnect();
       m.remove();
       map.current = null;
       markers.current.clear();
@@ -217,7 +225,13 @@ export function PolarMap(props: Props) {
       if (c) L.rectangle(llBounds(c.bounds), { color: T.sun, weight: 1, opacity: 0.5, fill: false, interactive: false }).addTo(f);
       L.marker(ll(site.x, site.y), { icon: reticle(T.sun), interactive: false }).addTo(f);
       if (selectedTag) L.marker(ll(site.x, site.y), { icon: tagIcon(selectedTag, T.sun), interactive: false }).addTo(f);
-      m.flyTo(ll(site.x, site.y), Math.max(m.getZoom(), 7), { duration: 0.8 });
+      // hidden map (globe or another page): just jump to the point, no animation
+      const z = Math.max(m.getZoom(), 7);
+      if (el.current && el.current.clientWidth > 0) {
+        m.invalidateSize({ animate: false }); // the map may have just appeared; ResizeObserver fires later
+        m.flyTo(ll(site.x, site.y), z, { duration: 0.8 });
+      }
+      else m.setView(ll(site.x, site.y), z, { animate: false });
     }
     if (picked) {
       if (pickedLink) {
@@ -226,9 +240,13 @@ export function PolarMap(props: Props) {
       }
       L.marker(ll(picked.x, picked.y), { icon: reticle(T.text), interactive: false }).addTo(f);
       if (pickedTag) L.marker(ll(picked.x, picked.y), { icon: tagIcon(pickedTag, T.text), interactive: false }).addTo(f);
-      if (!m.getBounds().pad(-0.1).contains(ll(picked.x, picked.y))) m.panTo(ll(picked.x, picked.y));
+      if (el.current && el.current.clientWidth === 0) m.setView(ll(picked.x, picked.y), m.getZoom(), { animate: false });
+      else if (!m.getBounds().pad(-0.1).contains(ll(picked.x, picked.y))) m.panTo(ll(picked.x, picked.y));
     }
-  }, [data, selectedId, selectedTag, picked, pickedTag, pickedLink]);
+    // dependencies are values, not objects: App recreates them every playback frame
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, selectedId, selectedTag?.title, selectedTag?.line, picked?.x, picked?.y, pickedTag?.title, pickedTag?.line,
+      pickedLink?.x, pickedLink?.y]);
 
   const zoom = (d: number) => map.current?.setZoom((map.current.getZoom() ?? 6) + d);
   const mouseLL = mouse && xyToLatLon(mouse[0], mouse[1]);
