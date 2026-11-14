@@ -1,0 +1,70 @@
+# Candidate points at the lunar south pole.
+#
+# lat  — latitude, deg, south negative
+# lon  — east longitude, deg (0..360 or -180..180, both work)
+# elev — height above the 1737.4 km sphere, m (0 = sphere; refined from LOLA DEM)
+#
+# NOTE: the coordinates below are preliminary, from open sources. Before the final
+# run check each point against the LOLA DEM and fix elev from the terrain.
+
+sites:
+  - id: shackleton-rim
+    name: Shackleton crater rim
+    lat: -89.68
+    lon: 129.20
+    elev: 0
+    note: |
+      Shackleton crater rim. The classic "peak of eternal light" point in the
+      literature: high illumination on the crest, permanent shadow on the floor.
+
+  - id: connecting-ridge
+    name: Connecting Ridge (Shackleton – de Gerlache)
+    lat: -89.45
+    lon: 222.0
+    elev: 0
+    note: Artemis III candidate region, one of the best-lit at the pole.
+
+  - id: de-gerlache-rim
+    name: de Gerlache crater rim
+    lat: -88.5
+    lon: 273.0
+    elev: 0
+
+  - id: mons-mouton
+    name: Mons Mouton
+    lat: -84.6
+    lon: 31.0
+    elev: 0
+    note: |
+      Plateau south of Nobile crater. VIPER's target; IM-2 Athena landed nearby
+      (84.79°S, 29.20°E, 2025-03-06).
+
+  - id: malapert-massif
+    name: Malapert Massif
+    lat: -86.0
+    lon: 2.7
+    elev: 0
+    note: High massif with good Earth visibility, a historical relay candidate.
+
+  - id: nobile-rim-1
+    name: Nobile crater rim 1
+    lat: -85.3
+    lon: 31.6
+    elev: 0
+
+  # Control points for checking the maths (not for mission analysis)
+  - id: check-equator
+    name: "CHECK: equator, 0E"
+    lat: 0.0
+    lon: 0.0
+    elev: 0
+    note: Sanity check — a solar day should come out at ~29.53 days.
+
+  - id: check-south-pole
+    name: "CHECK: geographic south pole"
+    lat: -90.0
+    lon: 0.0
+    elev: 0
+    note: |
+      Sanity check: Sun elevation should stay within ~±1.6°
+      (lunar axial tilt), Earth near the horizon with ~±7° libration.

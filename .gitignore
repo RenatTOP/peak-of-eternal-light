@@ -1,0 +1,24 @@
+# SPICE kernels: downloaded by script, kept out of the repo
+data/kernels/*
+!data/kernels/.gitkeep
+
+# DEMs: gigabytes
+data/dem/*
+!data/dem/.gitkeep
+
+# computed results
+out/
+*.csv
+*.png
+!team-*.jpg
+
+# python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/
+
+# ide
+.vscode/
+.idea/

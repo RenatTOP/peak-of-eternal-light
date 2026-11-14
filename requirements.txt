@@ -1,0 +1,8 @@
+spiceypy>=6.0
+numpy>=1.26
+matplotlib>=3.8
+PyYAML>=6.0
+pytest>=8.0
+
+# needed at the terrain stage:
+# rasterio>=1.3
