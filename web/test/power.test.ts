@@ -47,10 +47,11 @@ describe("power model", () => {
     expect(need).toBeLessThan(40 * 50 * 1.01);
   });
 
-  it("with a panel too small, the battery must cover the whole deficit of the period", () => {
-    const s = series(Array(200).fill(0.1)); // 30 W vs 100 W: minus 70 Wh every hour
+  it("drops to survival mode when the panel can't cover the operating load", () => {
+    const s = series(Array(200).fill(0.1)); // 30 W: short of the operating 100 -> survival 50 W
     const r = simulate(s, cfg);
+    expect(r.loadMeanW).toBe(50);
     expect(r.genMeanW).toBeLessThan(r.loadMeanW);
-    expect(batteryNeeded(s, cfg)).toBeCloseTo(200 * 70, -2);
+    expect(batteryNeeded(s, cfg)).toBeCloseTo(200 * 20, -2); // minus 20 Wh every hour
   });
 });

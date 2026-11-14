@@ -7,6 +7,7 @@ import { useCanvas } from "./useCanvas";
 
 interface Props {
   series: Series;
+  soc?: Float32Array | null; // battery charge 0..1 (energy model), separate lane
   cursor: number;
   onCursor: (i: number) => void;
 }
@@ -22,10 +23,10 @@ const C = {
 };
 
 /** Lanes over time: Sun disc share, direct link, both; click/drag sets the cursor. */
-export function Timeline({ series, cursor, onCursor }: Props) {
+export function Timeline({ series, soc, cursor, onCursor }: Props) {
   const ref = useRef<HTMLCanvasElement>(null);
   const size = useCanvas(ref);
-  const pad = { l: 44, r: 2, t: 6, b: 18 };
+  const pad = { l: 54, r: 2, t: 6, b: 18 };
 
   useEffect(() => {
     const cv = ref.current;
@@ -39,14 +40,14 @@ export function Timeline({ series, cursor, onCursor }: Props) {
 
     ctx.clearRect(0, 0, w, h);
 
-    // three lanes
-    const rows = [
-      { name: "Sun", y: pad.t, hgt: (h - pad.t - pad.b) * 0.5 },
-      { name: "Earth", y: 0, hgt: (h - pad.t - pad.b) * 0.22 },
-      { name: "Both", y: 0, hgt: (h - pad.t - pad.b) * 0.22 },
-    ];
-    rows[1].y = rows[0].y + rows[0].hgt + 3;
-    rows[2].y = rows[1].y + rows[1].hgt + 3;
+    // lanes: Sun, Earth, both and (with an energy model) battery charge
+    const H = h - pad.t - pad.b;
+    const rows = soc
+      ? [{ name: "Sun", y: pad.t, hgt: H * 0.36 }, { name: "Earth", y: 0, hgt: H * 0.15 },
+         { name: "Both", y: 0, hgt: H * 0.15 }, { name: "Battery", y: 0, hgt: H * 0.26 }]
+      : [{ name: "Sun", y: pad.t, hgt: H * 0.5 }, { name: "Earth", y: 0, hgt: H * 0.22 },
+         { name: "Both", y: 0, hgt: H * 0.22 }];
+    for (let k = 1; k < rows.length; k++) rows[k].y = rows[k - 1].y + rows[k - 1].hgt + 3;
 
     ctx.font = `11.5px ${T.sans}`;
     for (const r of rows) {
@@ -78,6 +79,18 @@ export function Timeline({ series, cursor, onCursor }: Props) {
     };
     band(rows[1], (i) => series.earthFrac[i] > 0, C.earth);
     band(rows[2], (i) => series.sunFrac[i] > 0 && series.earthFrac[i] > 0, C.both);
+    if (soc && rows[3]) {
+      // charge as an area; where the battery is empty, a full-height red band
+      const r3 = rows[3];
+      ctx.fillStyle = "rgba(134,201,232,0.55)";
+      ctx.beginPath();
+      ctx.moveTo(X(0), r3.y + r3.hgt);
+      for (let i = 0; i < n; i++) ctx.lineTo(X(i), r3.y + r3.hgt * (1 - soc[i]));
+      ctx.lineTo(X(n - 1), r3.y + r3.hgt);
+      ctx.closePath();
+      ctx.fill();
+      band(r3, (i) => soc[i] <= 0, T.empty);
+    }
 
     // time axis
     const span = series.t[n - 1] - series.t[0];
@@ -111,7 +124,7 @@ export function Timeline({ series, cursor, onCursor }: Props) {
     ctx.stroke();
     ctx.fillRect(cx - 4, 0, 8, 7);
     ctx.lineWidth = 1;
-  }, [series, cursor, size]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [series, soc, cursor, size]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pick = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const r = e.currentTarget.getBoundingClientRect();

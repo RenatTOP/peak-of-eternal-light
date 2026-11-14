@@ -14,6 +14,7 @@ export const T = {
   both: "#F4F8FB",
   night: "#A7B5C4",
   psr: "#9E93E8",
+  empty: "#FF6B5E", // battery empty / craft without power: the only alarm colour
   lane: "#0A1826",
   grid: "#0E1E2C",
   terrain: "#0B1826",

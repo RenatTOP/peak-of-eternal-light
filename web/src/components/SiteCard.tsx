@@ -1,5 +1,8 @@
 // 01 · SITE: what is chosen, four key numbers and a list of nearby or top-ranked places.
+import type { ReactNode } from "react";
+
 import type { Metrics } from "../lib/astro";
+import type { Spread } from "../lib/spread";
 import { fmtDuration } from "../lib/format";
 import { T } from "../lib/theme";
 import { Bar, Gauge, Head, Panel } from "./hud";
@@ -26,7 +29,11 @@ interface Props {
   onSelect: (id: string) => void;
   onCompare: () => void;
   compareCount: number;
+  spread?: Spread | null; // spread from terrain error (only sites with clones)
+  power?: ReactNode;
 }
+
+const days = (h: number) => (h >= 48 ? `${(h / 24).toFixed(1)} d` : `${Math.round(h)} h`);
 
 export function SiteCard(p: Props) {
   const m = p.metrics;
@@ -53,7 +60,16 @@ export function SiteCard(p: Props) {
                unit={m.nightMaxH >= 48 ? "d" : "h"} label="Longest night" color={T.night} sub={nightSub}
                title="Longest stretch with the whole solar disc hidden by terrain; the ring is scaled to one lunar day (29.5 d)." />
       </div>
+      {p.spread && (
+        <div className="spread" title="5–95% range over 100 versions of the terrain, each within NASA’s error estimate for the LOLA 5 m model (Barker et al. 2021).">
+          <span className="spread-k">TERRAIN ±</span>
+          <span>sun {p.spread.sunPct[0].toFixed(0)}–{p.spread.sunPct[1].toFixed(0)}%</span>
+          <span>Earth {p.spread.earthPct[0].toFixed(0)}–{p.spread.earthPct[1].toFixed(0)}%</span>
+          <span>night {days(p.spread.nightMaxH[0])}–{days(p.spread.nightMaxH[1])}</span>
+        </div>
+      )}
       {p.note && <p className="note">{p.note}</p>}
+      {p.power}
       <div style={{ marginTop: 10 }}><Head label={p.listTitle} /></div>
       <div className="rank">
         {p.list.map((r) => (

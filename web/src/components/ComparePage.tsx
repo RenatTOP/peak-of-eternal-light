@@ -6,20 +6,23 @@ import type { SiteInfo } from "../lib/data";
 import { fmtDuration } from "../lib/format";
 import { T } from "../lib/theme";
 import { Bar, Head, Panel } from "./hud";
+import { fmtWh } from "./PowerCard";
 
 export interface CompareRow {
   site: SiteInfo;
   analysis: Analysis;
 }
 
-type Key = "sun" | "night" | "earth" | "gap" | "both";
+type Key = "sun" | "night" | "battery" | "earth" | "gap" | "both";
 const KIND: Record<string, [string, string]> = {
   candidate: ["", T.muted], mission: ["Landed", T.earth], psr: ["Permanent shadow", T.psr],
 };
 
-function value(r: CompareRow, k: Key): number {
+function value(r: CompareRow, k: Key, battery: Record<string, number>): number {
   const m = r.analysis.metrics;
-  return { sun: m.sunMeanPct, night: -m.nightMaxH, earth: m.earthPct, gap: -m.gapMaxH, both: m.sunEarthPct }[k];
+  const b = battery[r.site.id];
+  return { sun: m.sunMeanPct, night: -m.nightMaxH, battery: Number.isFinite(b) ? -b : -Infinity, earth: m.earthPct,
+           gap: -m.gapMaxH, both: m.sunEarthPct }[k];
 }
 
 /** Year strip: Sun share over 73 slices of the period. */
@@ -44,14 +47,17 @@ function Strip({ a, width = 128, height = 16 }: { a: Analysis; width?: number; h
   );
 }
 
-export function ComparePage({ rows, selectedId, onOpen, period }: {
+export function ComparePage({ rows, selectedId, onOpen, period, battery, craft }: {
   rows: CompareRow[];
   selectedId: string | null;
   onOpen: (id: string) => void;
   period: string;
+  battery: Record<string, number>; // battery needed for the POWER CHECK craft, Wh
+  craft: string; // craft label for the header
 }) {
   const [key, setKey] = useState<Key>("sun");
-  const sorted = useMemo(() => [...rows].sort((a, b) => value(b, key) - value(a, key)), [rows, key]);
+  const sorted = useMemo(() => [...rows].sort((a, b) => value(b, key, battery) - value(a, key, battery)),
+                         [rows, key, battery]);
   const th = (k: Key | null, label: string, right = false) => (
     k ? <button className={`${k === key ? "on" : ""} ${right ? "r" : ""}`} onClick={() => setKey(k)}>{label}{k === key ? " ▾" : ""}</button>
       : <button disabled>{label}</button>
@@ -65,10 +71,10 @@ export function ComparePage({ rows, selectedId, onOpen, period }: {
   return (
     <>
       <Panel>
-        <Head num="01" label="COMPARE SITES" right={`${period} · click a row to open the site`} />
+        <Head num="01" label="COMPARE SITES" right={`${period} · battery for: ${craft} · click a row to open the site`} />
         <div className="ctable">
           <div className="crow head-row">
-            <span />{th(null, "SITE")}{th("sun", "SOLAR ENERGY")}{th("night", "LONGEST NIGHT", true)}
+            <span />{th(null, "SITE")}{th("sun", "SOLAR ENERGY")}{th("night", "LONGEST NIGHT", true)}{th("battery", "BATTERY", true)}
             {th("earth", "LINK TO EARTH")}{th("gap", "LONGEST GAP", true)}{th("both", "SUN+EARTH", true)}{th(null, "SUNLIGHT BY DATE")}
           </div>
           {sorted.map((r, n) => {
@@ -82,6 +88,8 @@ export function ComparePage({ rows, selectedId, onOpen, period }: {
                   {kind && <span style={{ fontSize: 11, color: kcol }}>{kind}</span>}</span>
                 <span className="cell"><Bar pct={m.sunMeanPct} color={T.sun} />{m.sunMeanPct.toFixed(0)}%</span>
                 <span className="cell r">{m.nightMaxH >= span * 0.98 ? "always" : fmtDuration(m.nightMaxH)}</span>
+                <span className="cell r" title={`Battery ${craft} needs to never run empty in this period`}>
+                  {m.sunAnyPct <= 0 ? "no sun" : fmtWh(battery[r.site.id] ?? NaN)}</span>
                 <span className="cell"><Bar pct={m.earthPct} color={T.earth} />{m.earthPct.toFixed(0)}%</span>
                 <span className="cell r">{m.earthPct <= 0 ? "no link" : m.gapMaxH <= 0 ? "none" : fmtDuration(m.gapMaxH)}</span>
                 <span className="cell r">{m.sunEarthPct.toFixed(0)}%</span>

@@ -17,6 +17,13 @@ export function MethodPage() {
             <li><b>Longest night</b>: longest stretch with the Sun fully hidden; it sizes the battery.</li>
             <li><b>Link to Earth</b>: share of time with any part of Earth above the terrain.</li>
             <li><b>Windows</b>: exact UTC intervals for sunlight, Earth link, both, and night.</li>
+            <li><b>Power check</b>: a vertical panel turning to face the Sun, a battery and two loads. The craft
+              operates while the panel covers its operating load and otherwise drops to survival mode on the battery.
+              We step through the period and report whether the battery ever runs empty, the lowest charge, and the
+              smallest battery that would never run empty.</li>
+            <li><b>Terrain uncertainty</b>: for eight candidate sites NASA publishes 100 versions of the 5 m terrain,
+              each within the error estimate of the LOLA model. We rerun every result on all 100 and show the
+              5–95% range, plus how many versions the craft survives.</li>
           </ul>
           <p>
             Catalog sites use horizons precomputed from 5 m terrain. For any other point south of 60°S the near
@@ -47,6 +54,13 @@ export function MethodPage() {
               <tr><td>Earth visibility</td><td>r = 0.995</td><td>+1.1 pp</td></tr>
             </tbody>
           </table>
+          <p>
+            <b>Terrain uncertainty</b>: across the 100 terrain versions, annual sunlight varies by 0.2–1.2 pp (1σ)
+            at the candidate sites, while the longest night can vary by days (Peak near Shackleton: 5.7–10.4 d),
+            which matters for sizing the battery. The spread of each version against NASA’s base LOLA terrain is
+            applied to our horizon; since our near terrain comes from the sharper shape-from-shading model, the
+            range is a conservative (wider) estimate.
+          </p>
           <p>
             Known events are reproduced: Chandrayaan-3 sunset on 4 September 2023 and sunrise on
             19–20 September, and IM-1 Odysseus sunset on 2 March 2024.

@@ -61,6 +61,7 @@ interface TimeProps {
   onStart: (t: number) => void;
   onDays: (d: number) => void;
   series: Series | null;
+  soc?: Float32Array | null;
   cursor: number;
   onCursor: (i: number) => void;
   playing: boolean;
@@ -93,7 +94,7 @@ export function TimeBar(p: TimeProps) {
             </div>
           </div>
         </div>
-        <div>{p.series && <Timeline series={p.series} cursor={p.cursor} onCursor={p.onCursor} />}</div>
+        <div>{p.series && <Timeline series={p.series} soc={p.soc} cursor={p.cursor} onCursor={p.onCursor} />}</div>
       </div>
     </Panel>
   );

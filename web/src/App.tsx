@@ -1,15 +1,18 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useDeferredValue, useEffect, useMemo, useState } from "react";
 
 import { Boot, Header, MobileNav, TimeBar, type Tab } from "./components/Chrome";
 import { ComparePage, type CompareRow } from "./components/ComparePage";
 import { Head, Panel } from "./components/hud";
 import { MethodPage } from "./components/MethodPage";
+import { PowerCard } from "./components/PowerCard";
 import { PolarMap, type OverlayKey } from "./components/PolarMap";
 import { ResultPanel } from "./components/ResultPanel";
 import { SiteCard, type ListRow } from "./components/SiteCard";
 import type { PointHorizon } from "./lib/anypoint";
-import { analyze, computeSeries, latLonToXY, xyToLatLon, type Analysis, type Horizon, type Observer } from "./lib/astro";
-import { loadAppData, type AppData, type LoadStep, type SiteInfo } from "./lib/data";
+import { analyze, computeSeries, computeTrack, latLonToXY, xyToLatLon, type Analysis, type Horizon, type Observer } from "./lib/astro";
+import { loadAppData, loadClones, type AppData, type LoadStep, type SiteInfo } from "./lib/data";
+import { batteryNeeded, generation, POWER_PRESETS, simulate, type PowerConfig } from "./lib/power";
+import { terrainSpread } from "./lib/spread";
 import { autoStepMs, DAY_MS, fmtLat, fmtLon } from "./lib/format";
 import { T } from "./lib/theme";
 
@@ -21,6 +24,16 @@ const Globe = lazy(() => import("./components/Globe").then((m) => ({ default: m.
 function run(data: AppData, obs: Observer, horizon: Horizon, start: number, days: number): Analysis {
   const end = Math.min(start + days * DAY_MS, data.ephem.end);
   return analyze(computeSeries(data.ephem, obs, horizon, start, end, autoStepMs(days)));
+}
+
+const POWER_KEY = "pel.power";
+
+function savedPower(): PowerConfig {
+  try {
+    const v = JSON.parse(localStorage.getItem(POWER_KEY) ?? "null");
+    if (v && ["panelW", "dayLoadW", "nightLoadW", "batteryWh"].every((k) => Number.isFinite(v[k]))) return v;
+  } catch { /* private mode etc.: use the default craft */ }
+  return POWER_PRESETS[0].cfg;
 }
 
 const siteObserver = (s: SiteInfo): Observer => ({ lat: s.lat, lon: s.lon, elevM: s.ground_z + s.horizon_height_m });
@@ -65,6 +78,12 @@ export default function App() {
   const [cursor, setCursor] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [overlays, setOverlays] = useState<Record<OverlayKey, boolean>>({ sun: false, earth: false, psr: false });
+  const [power, setPower] = useState<PowerConfig>(savedPower);
+  const [clones, setClones] = useState<{ id: string; h: Horizon[] } | null>(null);
+
+  useEffect(() => {
+    try { localStorage.setItem(POWER_KEY, JSON.stringify(power)); } catch { /* not critical */ }
+  }, [power]);
 
   useEffect(() => {
     loadAppData((s) => setLoaded((prev) => new Set(prev).add(s))).then(setData).catch((e) => setError(String(e)));
@@ -95,6 +114,37 @@ export default function App() {
   }, [data, picked, selected, byId, start, days]);
 
   useEffect(() => setCursor(0), [selectedId, picked, start, days]);
+
+  // --- horizon variants from terrain error: only for sites NASA provides clones for
+  useEffect(() => {
+    if (!data) return;
+    let alive = true;
+    loadClones(data, selectedId).then((h) => alive && setClones(h ? { id: selectedId, h } : null));
+    return () => { alive = false; };
+  }, [data, selectedId]);
+
+  const powerLazyAll = useDeferredValue(power);
+
+  // --- energy balance for what the panels show
+  const powerRes = useMemo(() => {
+    if (!view) return null;
+    const s = view.analysis.series;
+    const gen = generation(s, power.panelW);
+    return { result: simulate(s, power, gen), needWh: batteryNeeded(s, power, gen) };
+  }, [view, power]);
+
+  // battery needed at each site, for the COMPARE column
+  const batteryById = useMemo(() => Object.fromEntries(rows.map((r) => [r.site.id, batteryNeeded(r.analysis.series, powerLazyAll)])),
+                              [rows, powerLazyAll]);
+
+  // terrain spread: 100 runs; craft parameters deferred so typing stays smooth
+  const powerLazy = useDeferredValue(power);
+  const cloneFor = view?.what === "site" && selected && data?.clones?.sites[selected.id] ? selected.id : null;
+  const spread = useMemo(() => {
+    if (!data || !cloneFor || !selected || clones?.id !== cloneFor) return null;
+    const end = Math.min(start + days * DAY_MS, data.ephem.end);
+    return terrainSpread(computeTrack(data.ephem, siteObserver(selected), start, end, autoStepMs(days)), clones.h, powerLazy);
+  }, [data, cloneFor, selected, clones, start, days, powerLazy]);
 
   // --- playback: the period runs in about 20 seconds
   const n = view?.analysis.series.t.length ?? 0;
@@ -160,6 +210,11 @@ export default function App() {
   const nearest = picked ? [...data.sites].map((s) => ({ s, d: Math.hypot(s.x - picked.x, s.y - picked.y) })).sort((a, b) => a.d - b.d) : [];
   const m = view?.analysis.metrics;
 
+  const powerCard = powerRes && (
+    <PowerCard cfg={power} onCfg={setPower} result={powerRes.result} needWh={powerRes.needWh}
+               spread={spread} spreadLoading={!!cloneFor && !spread} />
+  );
+
   // --- left panel
   let left = null;
   if (view && m) {
@@ -173,7 +228,7 @@ export default function App() {
                   coords={`${fmtLat(picked.lat)} ${fmtLon(picked.lon)} · ${Math.round(p.groundZ)} m`}
                   notice={`Computed for this exact spot: terrain within ${Math.round(p.nearRadiusM / 1000)} km from ${p.nearDem}, ` +
                     `distant mountains from a ${p.farSpacingM / 1000} km grid. Catalog sites use 5 m terrain, so small ridges and boulders may be missing here.`}
-                  metrics={m} periodDays={days} listTitle="NEAREST SITES" list={list}
+                  metrics={m} periodDays={days} listTitle="NEAREST SITES" list={list} power={powerCard}
                   onSelect={openSite} onCompare={() => setTab("compare")} compareCount={data.sites.length} />
       );
     } else if (selected) {
@@ -186,6 +241,7 @@ export default function App() {
                   coords={`${fmtLat(selected.lat)} ${fmtLon(selected.lon)} · ${Math.round(selected.ground_z)} m`}
                   metrics={m} periodDays={days} listTitle="SITES · SOLAR ENERGY"
                   list={top.map((r) => ({ id: r.site.id, name: r.site.name, pct: r.analysis.metrics.sunMeanPct, on: r.site.id === selected.id }))}
+                  spread={spread} power={powerCard}
                   onSelect={openSite} onCompare={() => setTab("compare")} compareCount={data.sites.length} />
       );
     }
@@ -193,7 +249,7 @@ export default function App() {
 
   const timebar = (
     <TimeBar start={start} days={days} min={data.ephem.start} max={data.ephem.end - 14 * DAY_MS}
-             onStart={setStart} onDays={setDays} series={view?.analysis.series ?? null}
+             onStart={setStart} onDays={setDays} series={view?.analysis.series ?? null} soc={powerRes?.result.soc}
              cursor={cursor} onCursor={(i) => { setPlaying(false); setCursor(i); }}
              playing={playing} onPlay={() => setPlaying((p) => !p)} />
   );
@@ -257,7 +313,8 @@ export default function App() {
       </main>
       {tab === "compare" && (
         <main className="compare">
-          <ComparePage rows={rows} selectedId={selectedId} onOpen={openSite} period={periodLabel(start, days)} />
+          <ComparePage rows={rows} selectedId={selectedId} onOpen={openSite} period={periodLabel(start, days)}
+                       battery={batteryById} craft={POWER_PRESETS.find((p) => JSON.stringify(p.cfg) === JSON.stringify(power))?.label.toLowerCase() ?? "custom craft"} />
           {timebar}
         </main>
       )}
