@@ -1,6 +1,6 @@
 // Horizon of any point (60–90°S), computed in the browser:
 //  * near terrain (to ~33 km; ~47 km further from the pole) exactly at the clicked point
-//    from the dem/ terrain tiles (80 m to 80°S, 240 m beyond), as compute_horizon in horizon.py;
+//    from the dem/ terrain tiles (80 m to 80°S, 120 m beyond), as compute_horizon in horizon.py;
 //  * far mountains (30–300 km) from the far/ grid (pipeline/grid.py): 4 neighbouring nodes,
 //    each angle corrected to the observer height at the clicked point, then bilinear.
 // The same scheme in Python: pipeline/grid_check.py (catalog sites: within ~2 pp).
@@ -52,7 +52,7 @@ export interface PointHorizon {
   groundZ: number;
   heightM: number;
   zone: string;
-  nearDem: string; // "LOLA 80 m" / "LOLA 240 m"
+  nearDem: string; // "LOLA 80 m" / "LOLA 120 m"
   nearRadiusM: number;
   farSpacingM: number;
 }
@@ -376,7 +376,7 @@ export class AnyPoint {
     const zm = this.far.meta.zones[zone];
     if (Math.hypot(x, y) > zm.rho_max_m || Math.hypot(x, y) < 1) return null;
     const radius = zm.near.radius_m;
-    const levels = zone === "inner" ? ["n80", "n240"] : ["n240"];
+    const levels = zone === "inner" ? ["n80", "n120"] : ["n120"];
     await Promise.all(levels.map((l) => this.terrain.ensure(l, x, y, radius + 2 * this.terrain.level(l).res)));
     const groundZ = this.terrain.height(levels, x, y);
     if (!Number.isFinite(groundZ)) return null;

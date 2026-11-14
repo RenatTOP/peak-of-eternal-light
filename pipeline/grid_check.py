@@ -204,7 +204,7 @@ def browser_horizon(t: Tiles, x: float, y: float):
     inner = ZONES["inner"]
     zname = "inner" if np.hypot(x, y) <= inner.rho_max - inner.spacing else "outer"
     zone = ZONES[zname]
-    levels = ["n80", "n240"] if zname == "inner" else ["n240"]
+    levels = ["n80", "n120"] if zname == "inner" else ["n120"]
     ground = float(t.height(levels, np.array([x]), np.array([y]))[0])
     eye = ground + grid_mod.HEIGHT_M
     near = near_horizon(t, levels, x, y, eye, NEAR[zname]["radius_m"])

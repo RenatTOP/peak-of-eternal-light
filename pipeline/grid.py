@@ -92,7 +92,7 @@ ZONES = {
 }
 # Near terrain the browser traces itself: radius with a margin for the distance to a node,
 # so the near and far parts overlap.
-NEAR = {"inner": {"dem": "n80", "radius_m": 33_000.0}, "outer": {"dem": "n240", "radius_m": 47_000.0}}
+NEAR = {"inner": {"dem": "n80", "radius_m": 33_000.0}, "outer": {"dem": "n120", "radius_m": 47_000.0}}
 
 
 def far_min(zone: Zone) -> float:

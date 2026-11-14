@@ -100,15 +100,19 @@ export function PolarMap(props: Props) {
       zoomControl: false, attributionControl: true, preferCanvas: true,
     });
     m.attributionControl.setPrefix(false);
-    m.attributionControl.addAttribution("LOLA/LRO (NASA GSFC) · SfS: Bertone et al. · illumination: Mazarico et al.");
+    m.attributionControl.addAttribution("LOLA/LRO (NASA GSFC) · SfS: Bertone et al. · illumination: Mazarico et al., 60–66°S computed here");
     L.tileLayer(DATA_URL("tiles/base/{z}/{x}/{y}.jpg"), {
       maxNativeZoom: data.map.base_max_zoom, maxZoom: 11, noWrap: true, bounds: L.latLngBounds(ll(-W, -W), ll(W, W)),
     }).addTo(m);
-    const D = data.map.detail_half_m;
-    L.tileLayer(DATA_URL("tiles/detail/{z}/{x}/{y}.jpg"), {
-      minNativeZoom: data.map.detail_zooms[0], maxNativeZoom: data.map.detail_zooms.at(-1),
-      minZoom: data.map.detail_zooms[0], maxZoom: 11, noWrap: true, bounds: L.latLngBounds(ll(-D, -D), ll(D, D)),
-    }).addTo(m);
+    // detail: z6 for the whole map to 60°, z7 only to 75° (beyond that only 120 m exists and z6 just scales up)
+    const [z6, z7] = data.map.detail_zooms;
+    const F = data.map.fine_half_m ?? data.map.detail_half_m;
+    for (const [z, half] of [[z6, W], [z7, F]] as const) {
+      L.tileLayer(DATA_URL("tiles/detail/{z}/{x}/{y}.jpg"), {
+        minNativeZoom: z, maxNativeZoom: z, minZoom: z, maxZoom: 11, noWrap: true,
+        bounds: L.latLngBounds(ll(-half, -half), ll(half, half)),
+      }).addTo(m);
+    }
     graticule(L.layerGroup().addTo(m));
 
     const ov = (keys: string[]) => {
@@ -119,7 +123,9 @@ export function PolarMap(props: Props) {
       }
       return g;
     };
-    overlayLayers.current = { sun: ov(["sun_75S", "sun_85S"]), earth: ov(["earth_75S", "earth_85S"]), psr: ov(["psr_80S"]) };
+    // each map is its own ring around the pole (see build_overlays), so order doesn't matter
+    const byKind = (k: OverlayKey) => Object.keys(data.overlays).filter((n) => n.startsWith(`${k}_`));
+    overlayLayers.current = { sun: ov(byKind("sun")), earth: ov(byKind("earth")), psr: ov(byKind("psr")) };
     labels.current = L.layerGroup();
     focus.current = L.layerGroup().addTo(m);
 

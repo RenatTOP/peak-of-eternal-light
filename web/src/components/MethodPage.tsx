@@ -19,9 +19,9 @@ export function MethodPage() {
             <li><b>Windows</b>: exact UTC intervals for sunlight, Earth link, both, and night.</li>
           </ul>
           <p>
-            Catalog sites use horizons precomputed from 5 m terrain. For any other point the near terrain
-            (to ~33 km) is traced live from 80 m LOLA tiles, and distant mountains come from a precomputed
-            2 km grid, corrected for the observer’s height.
+            Catalog sites use horizons precomputed from 5 m terrain. For any other point south of 60°S the near
+            terrain (33–47 km) is traced live from LOLA tiles, 80 m poleward of 80°S and 120 m beyond, and distant
+            mountains come from a precomputed grid (2 km / 5 km spacing), corrected for the observer’s height.
           </p>
         </Panel>
         <Panel>
@@ -30,7 +30,8 @@ export function MethodPage() {
             <li><b>Ephemerides</b>: NASA/JPL NAIF SPICE, DE440 planetary ephemeris and lunar orientation (MOON_ME), 2024–2035.</li>
             <li><b>Terrain</b>: LRO LOLA polar DEMs, 5 m at candidate sites, 20–240 m regional (Barker et al.).</li>
             <li><b>Near-site detail</b>: shape-from-shading 5 m terrain and LROC NAC mosaics of Artemis III regions (Bertone et al.).</li>
-            <li><b>Reference maps</b>: average illumination, Earth visibility and permanent shadow (Mazarico et al., Barker et al.).</li>
+            <li><b>Reference maps</b>: average illumination, Earth visibility and permanent shadow to 65°S (Mazarico et al., Barker et al.).
+              NASA publishes none beyond 65°S, so the 60–66°S band on the map is computed here with the same horizon model, over the same 18.6 years.</li>
             <li><b>Globe</b>: NASA SVS CGI Moon Kit, LROC WAC colour and LOLA topography. The poles are drawn as
               polar stereographic caps, the south one shaded from the 240 m LOLA polar DEM.</li>
           </ul>
@@ -52,7 +53,7 @@ export function MethodPage() {
           </p>
           <p>
             <b>Any point on the map</b>: against full 5 m horizons, the live browser horizon differs by a median
-            0.3 pp in annual sunlight (random points near the landing regions) and 0.4 pp at catalog sites.
+            0.3 pp in annual sunlight (random points near the landing regions) and 0.2 pp at catalog sites.
             Errors grow where the Sun or Earth skims a sharp ridge that 80 m terrain smooths out,
             e.g. the rim of the Mons Mouton plateau.
           </p>

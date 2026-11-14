@@ -92,13 +92,9 @@ function capGeometry(cap: GlobeCap, fadeDeg: number): THREE.BufferGeometry {
 
 // Analysis zone around the south pole: edge latitudes come from the far-mountain grid
 // so the drawing always matches where a click gives a result.
-function analysisZone(data: AppData): { outerLat: number; innerLat: number } {
-  const z = data.anyPoint?.far.meta.zones;
-  const lat = (rho: number) => -90 + (2 * Math.atan(rho / (2 * R_MOON_M))) / D2R;
-  return {
-    outerLat: lat(z?.outer?.rho_max_m ?? 925_000),
-    innerLat: lat(z?.inner ? z.inner.rho_max_m - z.inner.spacing_m : 298_000),
-  };
+function analysisZone(data: AppData): { outerLat: number } {
+  const rho = data.anyPoint?.far.meta.zones.outer?.rho_max_m ?? 925_000;
+  return { outerLat: -90 + (2 * Math.atan(rho / (2 * R_MOON_M))) / D2R };
 }
 
 // Translucent disc from the pole to the edge: faint inside, denser at the rim
@@ -219,11 +215,8 @@ export function Globe({ data, selectedId, sunPctById, sunDir, earthDir, onPick, 
     fill.renderOrder = 2;
     const edge = new THREE.LineLoop(latRing(zone.outerLat),
       new THREE.LineBasicMaterial({ color: T.bracket, transparent: true, opacity: 0.95 }));
-    const inner = new THREE.LineLoop(latRing(zone.innerLat),
-      new THREE.LineDashedMaterial({ color: T.bracket, transparent: true, opacity: 0.6, dashSize: 0.01, gapSize: 0.008 }));
-    inner.computeLineDistances();
-    edge.renderOrder = inner.renderOrder = 3;
-    moon.add(fill, edge, inner);
+    edge.renderOrder = 3;
+    moon.add(fill, edge);
     scene.add(moon);
     const light = new THREE.DirectionalLight(0xffffff, 3.4);
     scene.add(light, new THREE.AmbientLight(0x9ec3dc, 0.05));

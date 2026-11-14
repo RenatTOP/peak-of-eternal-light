@@ -24,6 +24,7 @@ export type Bounds = [number, number, number, number]; // left, bottom, right, t
 export interface MapMeta {
   world_half_m: number;
   detail_half_m: number;
+  fine_half_m?: number; // extent of z7 (30/40 m); z6 covers the whole map
   tile_px: number;
   base_max_zoom: number;
   detail_zooms: number[];

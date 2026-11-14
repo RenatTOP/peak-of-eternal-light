@@ -2,7 +2,7 @@
 
     level   source                 step   coverage
     n80     LOLA 40 m (80°S), 2x2  80 m   rho <= 304 km
-    n240    LOLA 240 m (60°S)      240 m  rho <= 931 km
+    n120    LOLA 120 m (60°S)      120 m  rho <= 931 km
 
 Tile file: web/public/data/dem/<level>/<tx>_<ty>.bin, gzip of int16[256*256]:
 height in units of scale (0.5 m), row by row, each row as deltas from the left
@@ -34,7 +34,7 @@ NODATA = -32768
 OUT = WEB_DATA / "dem"
 LEVELS = {
     "n80": {"source": REGIONAL["r40"], "block": 2},
-    "n240": {"source": DEM_REGIONAL / "LDEM_60S_240MPP_ADJ.TIF", "block": 1, "rho_max": 975_000.0},
+    "n120": {"source": DEM_REGIONAL / "LDEM_60S_120MPP_ADJ.TIF", "block": 1, "rho_max": 975_000.0},
 }
 
 
