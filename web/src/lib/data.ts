@@ -63,6 +63,13 @@ export interface AppData {
   closeups: Record<string, ImageLayer>;
   globe: GlobeMeta | null;
   anyPoint: AnyPoint | null; // horizon of any point (near terrain + far-mountain grid)
+  clones: ClonesIndex | null; // which sites have horizon variants from terrain error
+}
+
+export interface ClonesIndex {
+  source: string;
+  method: string;
+  sites: Record<string, { n: number; n_az: number }>;
 }
 
 const BASE = "data/";
@@ -101,12 +108,34 @@ export async function loadAppData(onStep: (s: LoadStep) => void = () => {}): Pro
     json<Record<string, ImageLayer>>("closeups/closeups.json").catch(() => ({})),
     json<GlobeMeta>("globe/globe.json").catch(() => null),
     AnyPoint.load(httpLoader(BASE)).catch(() => null),
+    json<ClonesIndex>("horizons/clones/index.json").catch(() => null),
   ]).then((r) => {
     onStep("map");
     return r;
   });
-  const [ephem, { sites, horizons }, [map, overlays, closeups, globe, anyPoint]] = await Promise.all([ephemP, sitesP, mapP]);
-  return { ephem, sites, horizons, map, overlays, closeups, globe, anyPoint };
+  const [ephem, { sites, horizons }, [map, overlays, closeups, globe, anyPoint, clones]] = await Promise.all([ephemP, sitesP, mapP]);
+  return { ephem, sites, horizons, map, overlays, closeups, globe, anyPoint, clones };
+}
+
+const cloneCache = new Map<string, Promise<Horizon[] | null>>();
+
+/** A site's horizon variants from terrain error (100 LOLA clones); null if none. */
+export function loadClones(data: AppData, siteId: string): Promise<Horizon[] | null> {
+  const meta = data.clones?.sites[siteId];
+  if (!meta) return Promise.resolve(null);
+  let p = cloneCache.get(siteId);
+  if (!p) {
+    p = binary(`horizons/clones/${siteId}.bin`)
+      .then((buf) => new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer())
+      .then((raw) => {
+        const all = new Int16Array(raw);
+        return Array.from({ length: meta.n }, (_, k) =>
+          Horizon.fromInt16Centideg(all.slice(k * meta.n_az, (k + 1) * meta.n_az).buffer));
+      })
+      .catch(() => null);
+    cloneCache.set(siteId, p);
+  }
+  return p;
 }
 
 export const DATA_URL = (file: string) => BASE + file;

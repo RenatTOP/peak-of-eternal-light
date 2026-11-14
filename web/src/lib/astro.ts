@@ -181,22 +181,32 @@ export interface Series {
   earthFrac: Float32Array;
 }
 
-export function computeSeries(ephem: Ephem, obs: Observer, horizon: Horizon,
-                              startMs: number, endMs: number, stepMs: number): Series {
+/** Sun and Earth positions in the point's sky (no terrain): computed once; horizons
+ *  (the catalog one and 100 terrain variants) are applied to it separately (applyHorizon). */
+export interface SkyTrack {
+  t: Float64Array;
+  stepMs: number;
+  sunAlt: Float32Array;
+  sunAz: Float32Array;
+  sunR: Float32Array; // disc angular radius, °
+  earthAlt: Float32Array;
+  earthAz: Float32Array;
+  earthR: Float32Array;
+}
+
+export function computeTrack(ephem: Ephem, obs: Observer, startMs: number, endMs: number, stepMs: number): SkyTrack {
   const n = Math.max(2, Math.floor((endMs - startMs) / stepMs) + 1);
-  const s: Series = {
+  const k: SkyTrack = {
     t: new Float64Array(n), stepMs,
-    sunAlt: new Float32Array(n), sunAz: new Float32Array(n),
-    sunFrac: new Float32Array(n), sunFracFlat: new Float32Array(n),
-    earthAlt: new Float32Array(n), earthAz: new Float32Array(n), earthFrac: new Float32Array(n),
+    sunAlt: new Float32Array(n), sunAz: new Float32Array(n), sunR: new Float32Array(n),
+    earthAlt: new Float32Array(n), earthAz: new Float32Array(n), earthR: new Float32Array(n),
   };
   const site = siteVector(obs.lat, obs.lon, obs.elevM);
   const [e, nn, u] = enuBasis(site);
   const p: Vec3 = [0, 0, 0];
-
   for (let i = 0; i < n; i++) {
     const t = startMs + i * stepMs;
-    s.t[i] = t;
+    k.t[i] = t;
     for (const body of [0, 1] as const) {
       ephem.position(body, t, p);
       const vx = p[0] - site[0], vy = p[1] - site[1], vz = p[2] - site[2];
@@ -206,16 +216,33 @@ export function computeSeries(ephem: Ephem, obs: Observer, horizon: Horizon,
       let az = Math.atan2(ux * e[0] + uy * e[1] + uz * e[2], ux * nn[0] + uy * nn[1] + uz * nn[2]) / DEG;
       az = (az + 360) % 360;
       const r = Math.asin(Math.min((body === 0 ? ephem.sunRadius : ephem.earthRadius) / dist, 1)) / DEG;
-      const frac = discFraction(alt - horizon.at(az), r);
       if (body === 0) {
-        s.sunAlt[i] = alt; s.sunAz[i] = az; s.sunFrac[i] = frac;
-        s.sunFracFlat[i] = discFraction(alt, r);
+        k.sunAlt[i] = alt; k.sunAz[i] = az; k.sunR[i] = r;
       } else {
-        s.earthAlt[i] = alt; s.earthAz[i] = az; s.earthFrac[i] = frac;
+        k.earthAlt[i] = alt; k.earthAz[i] = az; k.earthR[i] = r;
       }
     }
   }
+  return k;
+}
+
+export function applyHorizon(k: SkyTrack, horizon: Horizon): Series {
+  const n = k.t.length;
+  const s: Series = {
+    t: k.t, stepMs: k.stepMs, sunAlt: k.sunAlt, sunAz: k.sunAz, earthAlt: k.earthAlt, earthAz: k.earthAz,
+    sunFrac: new Float32Array(n), sunFracFlat: new Float32Array(n), earthFrac: new Float32Array(n),
+  };
+  for (let i = 0; i < n; i++) {
+    s.sunFrac[i] = discFraction(k.sunAlt[i] - horizon.at(k.sunAz[i]), k.sunR[i]);
+    s.sunFracFlat[i] = discFraction(k.sunAlt[i], k.sunR[i]);
+    s.earthFrac[i] = discFraction(k.earthAlt[i] - horizon.at(k.earthAz[i]), k.earthR[i]);
+  }
   return s;
+}
+
+export function computeSeries(ephem: Ephem, obs: Observer, horizon: Horizon,
+                              startMs: number, endMs: number, stepMs: number): Series {
+  return applyHorizon(computeTrack(ephem, obs, startMs, endMs, stepMs), horizon);
 }
 
 // --------------------------------------------------------------------------- //
