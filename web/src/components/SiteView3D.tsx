@@ -65,14 +65,17 @@ void main() {
   gl_Position = projectionMatrix * (modelViewMatrix * vec4(position, 1.0));
 }`;
 
-const DEPTH_FS = /* glsl */ `void main() { gl_FragColor = vec4(0.0); }`;
-
 const COMMON_GLSL = /* glsl */ `
 const float PI = 3.14159265;
 const float R_MOON = 1737400.0;
 float discFrac(float delta, float r) {
   float d = clamp(delta / r, -1.0, 1.0);
   return 1.0 - (acos(d) - d * sqrt(1.0 - d * d)) / PI;
+}
+// regolith phase law (Allen's law for the Moon): backscatter is many times brighter than forward
+float phaseLaw(vec3 toSun, vec3 toEye) {
+  float a = degrees(acos(clamp(dot(toSun, toEye), -1.0, 1.0)));
+  return max(pow(10.0, -0.4 * (0.026 * a + 4e-9 * a * a * a * a)), 0.015);
 }
 vec3 tonemap(float I, float exposure) {
   vec3 c = vec3(1.0, 0.975, 0.94) * (1.0 - exp(-I * exposure));
@@ -137,7 +140,18 @@ float noise(vec2 p) {
   vec2 u = f * f * (3.0 - 2.0 * f);
   return mix(mix(hash(i), hash(i + vec2(1, 0)), u.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), u.x), u.y);
 }
-float detail(vec2 p) { return noise(p / 3.0) * 0.35 + noise(p / 11.0) * 0.9 + noise(p / 37.0) * 2.2; }
+// roughness below the model scale: fractal (amplitude ~ scale^0.8, as for regolith); an octave fades
+// once it is smaller than a pixel, so nothing shimmers in the distance
+float detail(vec2 p, float fp) {
+  float h = 0.0;
+  float sc = 0.6;
+  for (int k = 0; k < 4; k++) {
+    float fade = 1.0 - smoothstep(sc * 0.25, sc * 0.6, fp);
+    h += (noise(p / sc + float(k) * 17.3) - 0.5) * pow(sc, 0.8) * fade;
+    sc *= 2.7;
+  }
+  return h;
+}
 
 void main() {
   vec3 P = vP;
@@ -145,37 +159,43 @@ void main() {
   float hx = hAt(P.xy + vec2(s, 0.0)) - hAt(P.xy - vec2(s, 0.0));
   float hy = hAt(P.xy + vec2(0.0, s)) - hAt(P.xy - vec2(0.0, s));
   vec3 N = normalize(vec3(-hx / (2.0 * s), -hy / (2.0 * s), 1.0));
-  float dist = length(uCam - P);
-  // small relief missing from the 80 m model, only nearby, so the ground underfoot isn't a plane
-  float near = 1.0 - smoothstep(250.0, 2500.0, dist);
-  if (near > 0.0) {
-    float e = 0.6;
-    float d0 = detail(P.xy);
-    vec2 gd = vec2(detail(P.xy + vec2(e, 0.0)) - d0, detail(P.xy + vec2(0.0, e)) - d0) / e;
-    N = normalize(N + vec3(-gd * 0.35 * near, 0.0));
+  // small relief missing from the 80 m model, so the ground underfoot isn't a plane
+  float fp = length(fwidth(P.xy));
+  float tex = 0.0;
+  if (fp < 8.0) {
+    float e = max(0.15, fp * 0.5);
+    float d0 = detail(P.xy, fp);
+    vec2 gd = vec2(detail(P.xy + vec2(e, 0.0), fp) - d0, detail(P.xy + vec2(0.0, e), fp) - d0) / e;
+    N = normalize(N + vec3(-gd * 0.03, 0.0));
+    tex = d0;
   }
   vec3 V = normalize(uCam - P);
-  float albedo = 0.11 * (1.0 + 0.14 * (noise(P.xy / 900.0) - 0.5) + 0.08 * (noise(P.xy / 140.0) - 0.5));
-  float mu0 = dot(N, uSun);
-  float I = albedo * 0.012; // light reflected from sunlit slopes around
-  if (mu0 > 0.0) {
+  float albedo = 0.11 * (1.0 + 0.14 * (noise(P.xy / 900.0) - 0.5) + 0.08 * (noise(P.xy / 140.0) - 0.5) + 0.05 * tex);
+  // sub-pixel roughness (as in Hapke): part of the surface is lit even when the
+  // mean slope faces slightly away, so the terminator is soft, not black and white
+  float mu0 = 0.5 * (dot(N, uSun) + sqrt(dot(N, uSun) * dot(N, uSun) + 0.0016));
+  float I = albedo * 0.006; // light reflected from sunlit slopes around
+  if (mu0 > 0.002) {
     vec3 up = normalize(vec3(P.xy, P.z + R_MOON));
     float vis = min(farLight(P, up), 1.0);
     // the ray starts from the bilinear surface (like the ones it walks over), not from a mesh triangle
     if (vis > 0.0) vis = min(vis, nearLight(vec3(P.xy, max(P.z, hAt(P.xy)) + 0.5)));
     float mu = max(dot(N, V), 0.02);
-    I += albedo * (0.5 * mu0 + mu0 / (mu0 + mu)) * vis; // lunar Lambert, L = 0.5
+    I += albedo * (0.5 * mu0 + mu0 / (mu0 + mu)) * vis * phaseLaw(uSun, V); // lunar Lambert, L = 0.5
   }
   gl_FragColor = vec4(tonemap(I, uExposure), 1.0);
 }`;
 
 const RING_VS = /* glsl */ `
 attribute float aTop;
+attribute float aE;
 varying float vTop;
+varying float vE;
 varying vec3 vDir;
 uniform vec3 uEye;
 void main() {
   vTop = aTop;
+  vE = aE;
   vDir = position - uEye;
   gl_Position = projectionMatrix * (modelViewMatrix * vec4(position, 1.0));
 }`;
@@ -185,14 +205,20 @@ uniform vec3 uSun; // three.js
 uniform vec3 uUp;
 uniform float uExposure;
 varying float vTop;
+varying float vE;
 varying vec3 vDir;
 ${COMMON_GLSL}
 void main() {
-  // far mountains: slope facing us and slightly up; lit or not from the Sun direction
-  vec3 h = normalize(vDir - dot(vDir, uUp) * uUp);
+  // far mountains: slope facing us and slightly up. With a low Sun the crests catch the light
+  // and the foothills are in shadow: brightness fades with depth below the silhouette top
+  vec3 d = normalize(vDir);
+  vec3 h = normalize(d - dot(d, uUp) * uUp);
   vec3 n = normalize(-h * 0.8 + uUp * 0.6);
   float mu0 = max(dot(n, uSun), 0.0);
-  float I = 0.11 * (0.5 * mu0 + mu0 / (mu0 + 0.6)) * mix(0.35, 1.0, vTop) + 0.0015;
+  float below = vE - degrees(asin(clamp(dot(d, uUp), -1.0, 1.0)));
+  float sunEl = degrees(asin(clamp(dot(uSun, uUp), -1.0, 1.0)));
+  float crest = exp(-max(below, 0.0) / max(0.25, 0.4 * sunEl + 0.25));
+  float I = 0.11 * (0.5 * mu0 + mu0 / (mu0 + 0.3)) * crest * phaseLaw(uSun, -d) + 0.0012;
   gl_FragColor = vec4(tonemap(I, uExposure), 1.0);
 }`;
 
@@ -250,13 +276,13 @@ void main() {
 const EARTH_VS = /* glsl */ `
 varying vec3 vN;
 void main() {
-  vN = normal;
+  vN = normalMatrix * normal; // camera frame: z towards us (for the rim)
   gl_Position = projectionMatrix * (modelViewMatrix * vec4(position, 1.0));
 }`;
 
 // Earth: phase from the Sun direction; stylised clouds (ocean and clouds, no continents)
 const EARTH_FS = /* glsl */ `
-uniform vec3 uSun;
+uniform vec3 uSun; // camera frame
 varying vec3 vN;
 float hash(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
 float noise(vec3 p) {
@@ -265,13 +291,25 @@ float noise(vec3 p) {
   return mix(mix(mix(hash(i), hash(i + vec3(1, 0, 0)), u.x), mix(hash(i + vec3(0, 1, 0)), hash(i + vec3(1, 1, 0)), u.x), u.y),
              mix(mix(hash(i + vec3(0, 0, 1)), hash(i + vec3(1, 0, 1)), u.x), mix(hash(i + vec3(0, 1, 1)), hash(i + vec3(1, 1, 1)), u.x), u.y), u.z);
 }
+float fbm(vec3 p) {
+  float h = 0.0, a = 0.5;
+  for (int k = 0; k < 5; k++) { h += a * noise(p); p *= 2.13; a *= 0.5; }
+  return h;
+}
 void main() {
   vec3 n = normalize(vN);
-  float cl = noise(n * 4.0) * 0.6 + noise(n * 9.0) * 0.3 + noise(n * 20.0) * 0.1;
-  cl = smoothstep(0.48, 0.7, cl);
-  vec3 day = mix(vec3(0.05, 0.16, 0.42), vec3(0.93, 0.95, 0.98), cl);
-  float mu = dot(n, normalize(uSun));
-  vec3 c = day * smoothstep(-0.05, 0.25, mu) * (0.35 + 0.65 * max(mu, 0.0));
+  // clouds: swirled bands (noise-warped coordinates) and wider belts near the "equator" y = 0
+  vec3 q = n * 3.0 + vec3(fbm(n * 2.0), fbm(n * 2.0 + 5.2), fbm(n * 2.0 + 9.7)) * 1.6;
+  float cl = fbm(q * 1.4) + 0.12 * (1.0 - abs(n.y)) - 0.06;
+  cl = smoothstep(0.5, 0.72, cl);
+  vec3 ocean = mix(vec3(0.02, 0.09, 0.3), vec3(0.04, 0.18, 0.42), fbm(n * 6.0));
+  vec3 day = mix(ocean, vec3(0.92, 0.94, 0.97), cl);
+  vec3 L = normalize(uSun);
+  float mu = dot(n, L);
+  vec3 c = day * smoothstep(-0.04, 0.2, mu) * (0.3 + 0.7 * max(mu, 0.0));
+  // thin atmosphere: blue rim on the day side
+  float rim = pow(1.0 - max(n.z, 0.0), 3.0);
+  c += vec3(0.25, 0.5, 1.0) * rim * 0.5 * smoothstep(-0.1, 0.3, mu);
   gl_FragColor = vec4(pow(c, vec3(1.0 / 1.6)), 1.0);
 }`;
 
@@ -312,6 +350,7 @@ export default function SiteView3D({ ephem, anyPoint, target, t, readout, landma
   useEffect(() => {
     const e = new Engine(canvas.current!, overlay.current!, wrap.current!);
     eng.current = e;
+    if (import.meta.env.DEV) (window as unknown as { __v3: Engine }).__v3 = e; // for debugging in the console
     return () => {
       e.dispose();
       eng.current = null;
@@ -322,6 +361,8 @@ export default function SiteView3D({ ephem, anyPoint, target, t, readout, landma
   const spec = regionSpec(anyPoint, target.x, target.y, lite());
   const centre = regionCentre(target, region, spec.half);
   const ckey = `${Math.round(centre[0])},${Math.round(centre[1])}`;
+  // keep the old patch while the new one loads (otherwise the eye ends up outside it)
+  const here = region && `${Math.round(region.cx)},${Math.round(region.cy)}` === ckey ? region : null;
   useEffect(() => {
     let alive = true;
     setStatus({ kind: "loading", frac: 0, what: "terrain" });
@@ -340,31 +381,34 @@ export default function SiteView3D({ ephem, anyPoint, target, t, readout, landma
   const [lat, lon] = xyToLatLon(target.x, target.y);
   useEffect(() => {
     const e = eng.current;
-    if (!e || !region) return;
+    if (!e || !here) return;
     e.setObserver(lat, lon, target.groundZ);
     let alive = true;
-    anyPoint.far.at(region.zone, target.x, target.y, target.groundZ + EYE_M).then((far) => {
+    anyPoint.far.at(here.zone, target.x, target.y, target.groundZ + EYE_M).then((far) => {
       if (alive && far) e.setRing(far.elev);
     });
     return () => { alive = false; };
-  }, [region, lat, lon, target.groundZ, target.x, target.y, anyPoint]);
+  }, [here, lat, lon, target.groundZ, target.x, target.y, anyPoint]);
 
   useEffect(() => {
-    eng.current?.setRoute(region && target.route ? target.route : null);
-  }, [region, target.route]);
+    eng.current?.setRoute(here && target.route ? target.route : null);
+  }, [here, target.route]);
 
   useEffect(() => {
     eng.current?.setLandmarks(landmarks);
-  }, [region, landmarks, lat, lon]);
+  }, [here, landmarks, lat, lon]);
 
   // --- sky at time t
   useEffect(() => {
     const e = eng.current;
-    if (!e || !region) return;
-    setSky(e.setTime(ephem, t, readout?.sunFrac ?? 0));
-  }, [region, ephem, t, readout?.sunFrac, lat, lon]);
+    if (!e || !here) return;
+    setSky(e.setTime(ephem, t, readout?.sunFrac ?? 0, readout?.earthFrac ?? 0));
+  }, [here, ephem, t, readout?.sunFrac, readout?.earthFrac, lat, lon]);
 
-  // first look is at the Sun (or Earth if the Sun is down)
+  // first look is at the Sun (or Earth if the Sun is down); again at a new place,
+  // but not every time the rover moves
+  const who = target.kind === "route" ? "route" : `${Math.round(target.x)},${Math.round(target.y)}`;
+  useEffect(() => { aimed.current = false; }, [who]);
   useEffect(() => {
     if (!sky || aimed.current) return;
     aimed.current = true;
@@ -574,6 +618,8 @@ class Engine {
   private obs: { lat: number; lon: number; eye: Vec3; basis: [Vec3, Vec3, Vec3]; groundZ: number } | null = null;
   private look: Look = { yaw: 0, pitch: 0, fov: 60 };
   private sunDir: Vec3 = [0, 0, 1];
+  private radii = { sun: 0.0046, earth: 0.0165 };
+  private seen = { sun: true, earth: true }; // body visible from the eye (same numbers as the panel)
   private earthDir: Vec3 = [0, 0, 1];
   private marks: { name: string; p: Vec3; km: number }[] = [];
   private landmarks: Landmark[] = [];
@@ -621,7 +667,7 @@ class Engine {
     this.ringMat = new THREE.ShaderMaterial({
       vertexShader: RING_VS, fragmentShader: RING_FS,
       uniforms: { uSun: { value: new THREE.Vector3() }, uUp: { value: new THREE.Vector3(0, 1, 0) },
-                  uEye: { value: new THREE.Vector3() }, uExposure: { value: 8 } },
+                  uEye: { value: new THREE.Vector3() }, uExposure: { value: 16 } },
     });
 
     this.ro = new ResizeObserver(() => this.resize(wrap));
@@ -702,15 +748,23 @@ class Engine {
         pos[k * 3 + 2] = hm.half - j * hm.step;
       }
     }
-    const idx = new Uint32Array((S - 1) * (S - 1) * 6);
+    // cells in square rings from the centre out: the observer is near the centre, so the near
+    // ones draw first and the early depth test skips the heavy shader for hidden far ones
+    const C = S - 1;
+    const mid = (C - 1) / 2;
+    const ringOf = (i: number, j: number) => Math.round(Math.max(Math.abs(i - mid), Math.abs(j - mid)));
+    const start = new Uint32Array(Math.ceil(mid) + 3);
+    for (let j = 0; j < C; j++) for (let i = 0; i < C; i++) start[ringOf(i, j) + 1]++;
+    for (let k = 1; k < start.length; k++) start[k] += start[k - 1];
+    const cells = new Uint32Array(C * C);
+    for (let j = 0; j < C; j++) for (let i = 0; i < C; i++) cells[start[ringOf(i, j)]++] = j * S + i;
+    const idx = new Uint32Array(C * C * 6);
     let p = 0;
-    for (let j = 0; j < S - 1; j++) {
-      for (let i = 0; i < S - 1; i++) {
-        const a = j * S + i, b = a + 1, c = a + S, d = c + 1;
-        // counter-clockwise seen from above (+y)
-        idx[p++] = a; idx[p++] = b; idx[p++] = d;
-        idx[p++] = a; idx[p++] = d; idx[p++] = c;
-      }
+    for (const a of cells) {
+      const b = a + 1, c = a + S, d = c + 1;
+      // counter-clockwise seen from above (+y)
+      idx[p++] = a; idx[p++] = b; idx[p++] = d;
+      idx[p++] = a; idx[p++] = d; idx[p++] = c;
     }
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
@@ -733,20 +787,15 @@ class Engine {
       uniforms: {
         uH: { value: hTex }, uFar: { value: fTex }, uSize: { value: S }, uStep: { value: hm.step }, uHalf: { value: hm.half },
         uMaxU: { value: maxU + 1 }, uK: { value: r.K }, uNodeHalf: { value: r.nodeHalf }, uSunR: { value: 0.0046 },
-        uExposure: { value: 8 }, uGrow: { value: Math.pow(reach / (hm.step * 0.75), 1 / this.steps) },
+        uExposure: { value: 16 }, uGrow: { value: Math.pow(reach / (hm.step * 0.75), 1 / this.steps) },
         uSun: { value: new THREE.Vector3(0, 0, 1) }, uCam: { value: new THREE.Vector3() },
       },
-      depthFunc: THREE.EqualDepth, depthWrite: false,
     });
-    // depth only first, then the heavy shadow shader exactly once per pixel
-    const depthMat = new THREE.ShaderMaterial({ vertexShader: TERRAIN_VS, fragmentShader: DEPTH_FS, colorWrite: false });
-    const pre = new THREE.Mesh(g, depthMat);
-    pre.renderOrder = 0;
-    const shade = new THREE.Mesh(g, this.terrainMat);
-    shade.renderOrder = 1;
-    pre.frustumCulled = shade.frustumCulled = false;
-    this.terrain = [pre, shade];
-    this.scene.add(pre, shade);
+    const mesh = new THREE.Mesh(g, this.terrainMat);
+    mesh.renderOrder = 1;
+    mesh.frustumCulled = false;
+    this.terrain = [mesh];
+    this.scene.add(mesh);
     this.invalidate();
   }
 
@@ -782,6 +831,7 @@ class Engine {
     const [be, bn, bu] = o.basis;
     const pos: number[] = [];
     const top: number[] = [];
+    const topE: number[] = [];
     for (let k = 0; k <= n; k++) {
       const az = ((k % n) * 2 * Math.PI) / n;
       const E = elev[k % n] <= -89 ? -3 : elev[k % n];
@@ -790,6 +840,7 @@ class Engine {
         const d = [0, 1, 2].map((c) => ce * (Math.sin(az) * be[c] + Math.cos(az) * bn[c]) + se * bu[c]);
         pos.push(...v3([o.eye[0] + d[0] * RING_M, o.eye[1] + d[1] * RING_M, o.eye[2] + d[2] * RING_M]).toArray());
         top.push(isTop);
+        topE.push(E);
       }
     }
     const idx: number[] = [];
@@ -800,6 +851,7 @@ class Engine {
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
     g.setAttribute("aTop", new THREE.Float32BufferAttribute(top, 1));
+    g.setAttribute("aE", new THREE.Float32BufferAttribute(topE, 1));
     g.setIndex(idx);
     this.ringMat.side = THREE.DoubleSide;
     this.ring = new THREE.Mesh(g, this.ringMat);
@@ -828,7 +880,7 @@ class Engine {
         const [la, lo] = xyToLatLon(x, y);
         const l = toLocal(r.frame, siteVector(la, lo, 0));
         if (Math.abs(l[0]) > r.hm.half || Math.abs(l[1]) > r.hm.half) continue;
-        out.push(...v3([l[0], l[1], heightAt(r.hm, l[0], l[1]) + 2.5]).toArray());
+        out.push(...v3([l[0], l[1], heightAt(r.hm, l[0], l[1]) + 1.2]).toArray());
       }
     }
     const g = new THREE.BufferGeometry();
@@ -863,12 +915,14 @@ class Engine {
   }
 
   /** Sun, Earth and stars at time t. Returns the bodies' azimuth and elevation for the observer. */
-  setTime(ephem: Ephem, t: number, sunFrac: number) {
+  setTime(ephem: Ephem, t: number, sunFrac: number, earthFrac: number) {
+    this.seen = { sun: sunFrac > 0, earth: earthFrac > 0 };
     const r = this.region, o = this.obs;
     if (!r || !o) return null;
     const obsKm = siteVector(o.lat, o.lon, o.groundZ + EYE_M);
     const s = skyAt(ephem, r.frame, obsKm, t);
     this.sunDir = s.sun;
+    this.radii = { sun: s.sunRadius, earth: s.earthRadius };
     this.earthDir = s.earth;
     const sun = v3(s.sun), earth = v3(s.earth);
     const span = 4 * DEG;
@@ -881,7 +935,6 @@ class Engine {
     this.glareMat.uniforms.uK.value = sunFrac;
     this.earth.position.copy(earth.clone().multiplyScalar(1000));
     this.earth.scale.setScalar(1000 * Math.sin(s.earthRadius));
-    this.earthMat.uniforms.uSun.value.copy(sun);
     if (this.terrainMat) {
       this.terrainMat.uniforms.uSun.value.set(s.sun[0], s.sun[1], s.sun[2]);
       this.terrainMat.uniforms.uSunR.value = s.sunRadius;
@@ -951,6 +1004,7 @@ class Engine {
     this.sun.lookAt(eye);
     this.glare.lookAt(eye);
     if (this.terrainMat) this.terrainMat.uniforms.uCam.value.set(o.eye[0], o.eye[1], o.eye[2]);
+    this.earthMat.uniforms.uSun.value.copy(v3(this.sunDir)).transformDirection(cam.matrixWorldInverse);
     this.renderer.render(this.scene, cam);
     this.drawHud();
   }
@@ -1028,19 +1082,25 @@ class Engine {
         ctx.fill();
         const [bx, by, bok] = proj(d);
         if (bok && by > 40 && by < h - 20) {
+          const rpx = (Math.tan(label === "SUN" ? this.radii.sun : this.radii.earth) / ty) * (h / 2);
+          const seen = label === "SUN" ? this.seen.sun : this.seen.earth;
           ctx.textAlign = "left";
-          ctx.fillText(`${label} ${el.toFixed(1)}°`, bx + 12, by - 10);
+          ctx.globalAlpha = seen ? 1 : 0.6;
+          ctx.fillText(`${label} ${el.toFixed(1)}°${seen ? "" : " · behind terrain"}`, bx + rpx * 0.75 + 10, by - rpx * 0.75 - 6);
+          ctx.globalAlpha = 1;
           ctx.textAlign = "center";
         }
       } else {
+        // off screen: arrow at the side edge, at the body's elevation if possible
         const right = (((az - L.yaw) % 360) + 360) % 360 < 180;
-        const ex = right ? w - 14 : 14;
+        const ex = right ? w - 12 : 12;
+        const ey = Math.min(h - 110, Math.max(70, h / 2 - (el - L.pitch) * (h / L.fov))) + (label === "SUN" ? 0 : 18);
         ctx.beginPath();
-        if (right) { ctx.moveTo(ex + 6, 40); ctx.lineTo(ex - 2, 34); ctx.lineTo(ex - 2, 46); }
-        else { ctx.moveTo(ex - 6, 40); ctx.lineTo(ex + 2, 34); ctx.lineTo(ex + 2, 46); }
+        if (right) { ctx.moveTo(ex + 6, ey); ctx.lineTo(ex - 2, ey - 6); ctx.lineTo(ex - 2, ey + 6); }
+        else { ctx.moveTo(ex - 6, ey); ctx.lineTo(ex + 2, ey - 6); ctx.lineTo(ex + 2, ey + 6); }
         ctx.fill();
         ctx.textAlign = right ? "right" : "left";
-        ctx.fillText(label, right ? ex - 8 : ex + 8, 44);
+        ctx.fillText(label, right ? ex - 8 : ex + 8, ey + 4);
         ctx.textAlign = "center";
       }
     }
@@ -1058,10 +1118,12 @@ class Engine {
       ctx.beginPath();
       ctx.moveTo(x, y - 4); ctx.lineTo(x, y - 18);
       ctx.stroke();
+      const tw = Math.max(ctx.measureText(m.name).width, 50);
+      const tx = x + 4 + tw > w - 6 ? x - 4 - tw : x + 4;
       ctx.fillStyle = T.text;
-      ctx.fillText(m.name, x + 4, y - 22);
+      ctx.fillText(m.name, tx, y - 22);
       ctx.fillStyle = T.muted;
-      ctx.fillText(`${m.km.toFixed(1)} km`, x + 4, y - 9 - 0);
+      ctx.fillText(`${m.km.toFixed(1)} km`, tx, y - 9);
     }
   }
 

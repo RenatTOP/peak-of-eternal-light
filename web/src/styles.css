@@ -498,9 +498,19 @@ button.crow.on { background: rgba(255, 181, 71, 0.08); border-left-color: var(--
 .v3-load p { margin: 0; }
 .v3-bar { height: 3px; background: var(--line); }
 .v3-bar i { display: block; height: 100%; background: var(--brk); transition: width 0.2s; }
-@media (max-width: 960px) {
-  .v3-title { top: 34px; left: 10px; }
+/* small stage (2-3 columns, phone): less text over the frame */
+.view3d { container-type: size; }
+@container (max-height: 480px) {
+  .v3-foot { display: none; }
+  .v3-readout { bottom: 10px; padding: 5px 9px; gap: 3px; font-size: 11px; }
+  .v3-title .muted { display: none; }
+}
+@container (max-width: 620px) {
+  .v3-title { top: 34px; left: 10px; font-size: 10.5px; }
+  .v3-title b { font-size: 11px; }
   .v3-tools { top: auto; bottom: 10px; right: 10px; }
-  .v3-readout { left: 10px; bottom: 64px; font-size: 11px; }
+  .v3-tools .tool { padding: 0 9px; }
+  .v3-readout { left: 10px; bottom: 10px; max-width: calc(100% - 200px); font-size: 10.5px; }
+  .v3-readout .muted { display: none; }
   .v3-foot { display: none; }
 }

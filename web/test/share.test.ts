@@ -34,6 +34,13 @@ describe("share link", () => {
     expect(back.power).toEqual(s.power);
   });
 
+  it("keeps the 3D view in the link", () => {
+    const h = encodeShare({ ...SHARE_DEFAULTS, stage: "view", site: "malapert-massif" });
+    expect(h).toContain("view=3d");
+    expect(decodeShare(h).stage).toBe("view");
+    expect(decodeShare("#view=vr").stage).toBeUndefined();
+  });
+
   it("ignores junk instead of breaking", () => {
     const q = decodeShare("#tab=hack&site=<script>&pt=12,500&route=1,2&days=-5&from=yesterday&craft=ufo&pw=1,2,3&layers=sun,x&mdays=9999");
     expect(q).toEqual({ layers: ["sun"] });

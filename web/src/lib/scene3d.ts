@@ -146,12 +146,6 @@ export function observerBasis(f: Frame, lat: number, lon: number): [Vec3, Vec3, 
   return [dirLocal(f, e), dirLocal(f, n), dirLocal(f, u)];
 }
 
-/** Lunar rotation angle about the axis (for stars), rad: sidereal month 27.321661 days. */
-export function moonRotation(t: number): number {
-  const d = (t - Date.UTC(2000, 0, 1, 12)) / 86_400_000;
-  return ((38.3213 + 13.17635815 * d) % 360) * DEG;
-}
-
 /** Surface drop from curvature at distance d (m), for checks. */
 export const curvatureDrop = (d: number) => R_MOON_M - Math.sqrt(R_MOON_M * R_MOON_M - d * d);
 
