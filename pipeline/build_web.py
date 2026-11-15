@@ -60,6 +60,7 @@ BASE_MAX_Z = 5
 DETAIL_ZOOMS = (6, 7)  # z6: whole map to 60°; z7: square to 75° (30 and 40 m there)
 
 EPHEM_START = "2023-07-01T00:00:00"
+EPHEM_STEP_S = 6 * 3600.0
 EPHEM_END = "2036-01-01T00:00:00"
 
 
@@ -74,14 +75,17 @@ def log(msg: str) -> None:
 
 def build_ephem() -> None:
     et0, et1 = spice.str2et(EPHEM_START), spice.str2et(EPHEM_END)
-    ets = np.arange(et0, et1, 3600.0)
+    # 6 h step + cubic interpolation in the browser: direction error < 2e-5° (hourly linear
+    # gave up to 6e-4°) and a 6x smaller file: 0.44 MB instead of 2.5
+    ets = np.arange(et0, et1 + EPHEM_STEP_S, EPHEM_STEP_S)
     sun = body_positions("SUN", ets)
     earth = body_positions("EARTH", ets)
     arr = np.concatenate([sun, earth], axis=1).astype("<f4")  # (n, 6)
     (WEB_DATA / "ephem.bin").write_bytes(arr.tobytes())
     meta = {
         "start_utc": EPHEM_START + "Z",
-        "step_s": 3600,
+        "step_s": int(EPHEM_STEP_S),
+        "interp": "cubic",
         "n": int(len(ets)),
         "layout": "float32 little-endian, per step: sun_x sun_y sun_z earth_x earth_y earth_z (km)",
         "frame": "MOON_ME (DE440 aligned to DE421 ME), Moon-centered, LT+S",
@@ -483,16 +487,33 @@ def _normal_rgb(gx: np.ndarray, gy: np.ndarray, k: float) -> np.ndarray:
     return np.clip((n + 1) * 127.5, 0, 255).astype(np.uint8)
 
 
+TEX_LO = 1024  # longest side of the quick texture: globe shows at once, full one loads after
+
+
+def _save_tex(img: np.ndarray, path: Path, quality: int) -> str:
+    """Globe texture as WebP plus a smaller <name>_lo.webp. Returns the path relative to WEB_DATA."""
+    im = Image.fromarray(img)
+    im.save(path, "WEBP", quality=quality, method=6)
+    scale = TEX_LO / max(im.size)
+    if scale < 1:
+        lo = im.resize((round(im.width * scale), round(im.height * scale)), Image.LANCZOS)
+    else:
+        lo = im
+    lo.save(path.with_name(path.stem + "_lo.webp"), "WEBP", quality=min(quality, 80), method=6)
+    return path.relative_to(WEB_DATA).as_posix()
+
+
 def build_globe() -> None:
     """Globe texture and normals (NASA CGI Moon Kit), polar caps and the polar "lens" image."""
     from .datasets import MOONKIT
 
     gdir = WEB_DATA / "globe"
+    shutil.rmtree(gdir, ignore_errors=True)
     gdir.mkdir(parents=True, exist_ok=True)
     with rasterio.open(MOONKIT / "lroc_color_poles_8k.tif") as ds:
         color8k = np.moveaxis(ds.read(), 0, -1)
         rgb = np.moveaxis(ds.read(out_shape=(3, GLOBE_H, GLOBE_W), resampling=Resampling.average), 0, -1)
-    Image.fromarray(rgb.astype(np.uint8)).save(gdir / "moon_color.jpg", quality=85, optimize=True)
+    color_file = _save_tex(rgb.astype(np.uint8), gdir / "moon_color.webp", 82)
 
     # tangent-space normals (R east, G north), relief exaggerated to read on the globe.
     # Near the poles 1/cos(lat) blows up noise; the sphere stops there and a cap takes over.
@@ -505,7 +526,7 @@ def build_globe() -> None:
     gx = (np.roll(dem, -1, 1) - np.roll(dem, 1, 1)) / (2 * dlon * r_km * np.maximum(np.cos(lat), 0.05)[:, None])
     gy = (np.roll(dem, 1, 0) - np.roll(dem, -1, 0)) / (2 * dlat * r_km)
     gy[0], gy[-1] = gy[1], gy[-2]
-    Image.fromarray(_normal_rgb(gx, gy, 2.5)).save(gdir / "moon_normal.jpg", quality=88, optimize=True)
+    normal_file = _save_tex(_normal_rgb(gx, gy, 2.5), gdir / "moon_normal.webp", 85)
 
     caps = {}
     for name, cfg in CAPS.items():
@@ -515,7 +536,7 @@ def build_globe() -> None:
         cpx = min(px, 2048)  # colour mosaic is ~1.3 km/px; a bigger texture adds nothing
         _, _, alat, alon = _cap_lonlat(sign, rho_max, cpx)
         col = _sample_equirect(color8k, alat, alon, order=1)
-        Image.fromarray(np.clip(col, 0, 255).astype(np.uint8)).save(gdir / f"cap_{name}_color.jpg", quality=85, optimize=True)
+        cap_color = _save_tex(np.clip(col, 0, 255).astype(np.uint8), gdir / f"cap_{name}_color.webp", 82)
         if name == "south":
             with rasterio.open(DEM_REGIONAL / "LDEM_60S_240MPP_ADJ.TIF") as ds:
                 z = ds.read(1, window=from_bounds(-rho_max, -rho_max, rho_max, rho_max, ds.transform),
@@ -529,8 +550,8 @@ def build_globe() -> None:
         m = 1 + (x * x + y * y) / (4 * R_MOON_M**2)
         gx = np.gradient(z, axis=1) / step * m
         gy = -np.gradient(z, axis=0) / step * m  # rows go down, v goes up
-        Image.fromarray(_normal_rgb(gx, gy, k)).save(gdir / f"cap_{name}_normal.jpg", quality=88, optimize=True)
-        caps[name] = {"color": f"globe/cap_{name}_color.jpg", "normal": f"globe/cap_{name}_normal.jpg",
+        cap_normal = _save_tex(_normal_rgb(gx, gy, k), gdir / f"cap_{name}_normal.webp", 85)
+        caps[name] = {"color": cap_color, "normal": cap_normal,
                       "sign": sign, "colat_deg": cfg["colat_deg"], "rho_max_m": rho_max}
         log(f"globe: cap {name} {px}px, {step:.0f} m/px, to {90 - cfg['colat_deg']:.0f}°")
 
@@ -544,7 +565,7 @@ def build_globe() -> None:
     dark, light = np.array([5, 11, 19.0]), np.array([188, 204, 214.0])
     Image.fromarray((dark + (light - dark) * g[..., None]).astype(np.uint8)).save(gdir / "pole_lens.jpg", quality=86)
     (gdir / "globe.json").write_text(json.dumps({
-        "color": "globe/moon_color.jpg", "normal": "globe/moon_normal.jpg",
+        "color": color_file, "normal": normal_file, "lo": True,
         "caps": caps, "cap_fade_deg": CAP_FADE_DEG,
         "lens": {"file": "globe/pole_lens.jpg", "bounds": bounds},
         "source": "NASA SVS CGI Moon Kit: LROC WAC color, LOLA LDEM 16 ppd; south cap: LOLA 240 m polar DEM; lens: LOLA 40 m hillshade",

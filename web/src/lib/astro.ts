@@ -10,10 +10,11 @@ export interface EphemMeta {
   start_utc: string;
   step_s: number;
   n: number;
+  interp?: "cubic" | "linear";
   radius_km: { SUN: number; EARTH: number; MOON: number };
 }
 
-/** Sun and Earth positions relative to the Moon's centre (MOON_ME, km), hourly. */
+/** Sun and Earth positions relative to the Moon's centre (MOON_ME, km) every step_s. */
 export class Ephem {
   readonly t0: number; // unix ms of the first step
   readonly stepMs: number;
@@ -23,6 +24,7 @@ export class Ephem {
 
   readonly meta: EphemMeta;
   private readonly data: Float32Array;
+  private readonly cubic: boolean;
 
   constructor(meta: EphemMeta, data: Float32Array) {
     this.meta = meta;
@@ -32,6 +34,7 @@ export class Ephem {
     this.n = meta.n;
     this.sunRadius = meta.radius_km.SUN;
     this.earthRadius = meta.radius_km.EARTH;
+    this.cubic = meta.interp === "cubic";
   }
 
   get start(): number {
@@ -42,17 +45,33 @@ export class Ephem {
     return this.t0 + (this.n - 1) * this.stepMs;
   }
 
-  /** Body position (0 = Sun, 1 = Earth) at t (unix ms), linear interpolation. */
+  /** Body position (0 = Sun, 1 = Earth) at t (unix ms): cubic Lagrange
+   *  interpolation over 4 nodes (ephem.json interp = "cubic"), else linear. */
   position(body: 0 | 1, t: number, out: Vec3 = [0, 0, 0]): Vec3 {
-    const f = (t - this.t0) / this.stepMs;
-    const i = Math.min(Math.max(Math.floor(f), 0), this.n - 2);
-    const w = Math.min(Math.max(f - i, 0), 1);
-    const a = i * 6 + body * 3;
-    const b = a + 6;
+    const f = Math.min(Math.max((t - this.t0) / this.stepMs, 0), this.n - 1); // out of range: clamp to the edge
+    const i = Math.min(Math.floor(f), this.n - 2);
+    const u = Math.min(Math.max(f - i, 0), 1);
     const d = this.data;
-    out[0] = d[a] + (d[b] - d[a]) * w;
-    out[1] = d[a + 1] + (d[b + 1] - d[a + 1]) * w;
-    out[2] = d[a + 2] + (d[b + 2] - d[a + 2]) * w;
+    const o = body * 3;
+    if (this.cubic && this.n >= 4) {
+      // nodes i-1, i, i+1, i+2 (shifted inwards near the edges)
+      const k = Math.min(Math.max(i - 1, 0), this.n - 4);
+      const x = f - k; // position relative to the first node, 0..3
+      const w0 = -((x - 1) * (x - 2) * (x - 3)) / 6;
+      const w1 = (x * (x - 2) * (x - 3)) / 2;
+      const w2 = -(x * (x - 1) * (x - 3)) / 2;
+      const w3 = (x * (x - 1) * (x - 2)) / 6;
+      const a = k * 6 + o;
+      for (let c = 0; c < 3; c++) {
+        out[c] = w0 * d[a + c] + w1 * d[a + 6 + c] + w2 * d[a + 12 + c] + w3 * d[a + 18 + c];
+      }
+      return out;
+    }
+    const a = i * 6 + o;
+    const b = a + 6;
+    out[0] = d[a] + (d[b] - d[a]) * u;
+    out[1] = d[a + 1] + (d[b + 1] - d[a + 1]) * u;
+    out[2] = d[a + 2] + (d[b + 2] - d[a + 2]) * u;
     return out;
   }
 }
