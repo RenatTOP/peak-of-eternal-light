@@ -21,7 +21,13 @@ import sys
 import time
 from concurrent.futures import ProcessPoolExecutor
 
-import numpy as np
+# Parallel by processes, so BLAS in each is single-threaded. Otherwise 16 processes × 24
+# OpenBLAS threads fight over 16 cores and it runs many times slower. Must precede the numpy import.
+for _v in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
+    os.environ.setdefault(_v, "1")
+
+import numba  # noqa: E402
+import numpy as np  # noqa: E402
 
 from . import grid_check as gc
 from .datasets import DATA

@@ -193,7 +193,7 @@ sites:
   # (LPSR_80S_20MPP map, Barker et al. 2023). The model should give ~0% Sun.
 
   - id: haworth
-    name: Haworth, permanent shadow
+    name: Haworth crater (permanent shadow)
     tile: Haworth
     sfs: A302
     lat: -86.7715
@@ -203,7 +203,7 @@ sites:
     note: Permanently shadowed point 270 m from the tile centre; possible water ice.
 
   - id: shoemaker
-    name: Shoemaker, permanent shadow
+    name: Shoemaker crater (permanent shadow)
     tile: Shoemaker
     lat: -87.1713
     lon: 62.984

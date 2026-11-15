@@ -1,0 +1,5 @@
+# LF for all text files, regardless of Windows settings
+* text=auto eol=lf
+*.jpg binary
+*.png binary
+*.bin binary

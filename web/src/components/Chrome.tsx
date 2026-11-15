@@ -1,4 +1,6 @@
 // Header, 02 · TIME (playback, date, period, timeline) and the loading screen.
+import { useEffect, useState } from "react";
+
 import type { Series } from "../lib/astro";
 import type { LoadStep } from "../lib/data";
 import { fmtDate } from "../lib/format";
@@ -9,8 +11,16 @@ import { Timeline } from "./Timeline";
 export type Tab = "explore" | "compare" | "missions" | "method";
 const TABS: [Tab, string][] = [["explore", "EXPLORE"], ["compare", "COMPARE"], ["missions", "MISSIONS"], ["method", "DATA & METHOD"]];
 
-export function Header({ tab, onTab, clock }: { tab: Tab; onTab: (t: Tab) => void; clock: number | null }) {
-  const iso = clock === null ? "" : new Date(clock).toISOString();
+export function Header({ tab, onTab, clock, onShare }: {
+  tab: Tab; onTab: (t: Tab) => void; clock: number | null; onShare: () => Promise<boolean>;
+}) {
+  const iso = clock === null || !Number.isFinite(clock) ? "" : new Date(clock).toISOString();
+  const [shared, setShared] = useState<"" | "ok" | "fail">("");
+  useEffect(() => {
+    if (!shared) return;
+    const id = setTimeout(() => setShared(""), 2500);
+    return () => clearTimeout(id);
+  }, [shared]);
   return (
     <header className="topbar">
       <div className="brand">
@@ -27,6 +37,15 @@ export function Header({ tab, onTab, clock }: { tab: Tab; onTab: (t: Tab) => voi
           </button>
         ))}
       </nav>
+      <button className={`share ${shared}`} onClick={() => onShare().then((ok) => setShared(ok ? "ok" : "fail"))}
+              title="Copy a link to exactly this view: site or route, dates, moment, craft and layers">
+        <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+          {shared === "ok"
+            ? <path d="M2 6.2 L4.8 9 L10 3" fill="none" stroke="currentColor" strokeWidth="1.5" />
+            : <path d="M6 1.5 V8 M3.2 4.2 L6 1.5 L8.8 4.2 M1.5 7.5 V10.5 H10.5 V7.5" fill="none" stroke="currentColor" strokeWidth="1.3" />}
+        </svg>
+        <span>{shared === "ok" ? "Link copied" : shared === "fail" ? "Copy the URL" : "Share"}</span>
+      </button>
       {clock !== null && (
         <div className="clock" title="Time at the timeline cursor">
           <span className="clock-date">{iso.slice(0, 10)}</span>

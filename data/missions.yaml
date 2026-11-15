@@ -1,0 +1,214 @@
+# CLPS missions (NASA Commercial Lunar Payload Services) as of late September 2026.
+#
+# Fields:
+#   status    — success | partial | failure | planned
+#   launch    — launch date (ISO if flown, else plan text as in the source: "NET Q1 2027")
+#   landing   — actual landing, UTC; end — end of surface operations
+#   site      — catalog site id (data/sites.yaml), if the landing site is in it
+#   where     — landing point (precision: landed) or region centre (precision: region, radius_km)
+#               per the IAU gazetteer; exact points of planned missions are unpublished
+#   window    — period analysed in the browser (landing to end of operations, with margin)
+#   payloads  — NASA payloads
+#   sources   — data sources
+#
+# Overview: science.nasa.gov/lunar-science/clps-deliveries, en.wikipedia.org/wiki/Commercial_Lunar_Payload_Services
+
+missions:
+  - id: peregrine
+    name: Peregrine Mission One
+    provider: Astrobotic
+    lander: Peregrine
+    task_order: TO2-AB
+    launch: "2024-01-08"
+    status: failure
+    outcome: "Propellant leak after launch; never attempted a landing, re-entered Earth’s atmosphere on 18 Jan 2024."
+    where: {name: "Sinus Viscositatis (target)", precision: none}
+    payloads: [Laser Retroreflector Array, Linear Energy Transfer Spectrometer, Navigation Doppler Lidar,
+               Near-Infrared Volatile Spectrometer System, Neutron Spectrometer System, Peregrine Ion-Trap Mass Spectrometer]
+    sources: [https://en.wikipedia.org/wiki/Peregrine_Mission_One, https://science.nasa.gov/lunar-science/clps-deliveries/]
+
+  - id: im-1
+    name: IM-1 · Odysseus
+    provider: Intuitive Machines
+    lander: Nova-C
+    task_order: TO2-IM
+    launch: "2024-02-15"
+    landing: "2024-02-22T23:24Z"
+    end: "2024-02-29"
+    status: partial
+    outcome: "First US soft landing since 1972, but it came down on a 12° slope, broke a leg and tipped over; operated until its solar power faded a week later."
+    site: im1-odysseus
+    where: {name: "Malapert A region", lat: -80.13, lon: 1.44, precision: landed}
+    window: ["2024-02-22", "2024-03-07"]
+    payloads: [Laser Retro-Reflector Array, Navigation Doppler Lidar, Lunar Node 1 Navigation Demonstrator,
+               Stereo Cameras for Lunar Plume-Surface Studies, ROLSES radio observations, Radio Frequency Mass Gauge]
+    sources: [https://en.wikipedia.org/wiki/IM-1, https://science.nasa.gov/lunar-science/clps-deliveries/]
+
+  - id: blue-ghost-1
+    name: Blue Ghost Mission 1
+    provider: Firefly Aerospace
+    lander: Blue Ghost
+    task_order: TO19D
+    launch: "2025-01-15"
+    landing: "2025-03-02T08:34Z"
+    end: "2025-03-16T23:25Z"
+    status: success
+    outcome: "First fully successful commercial Moon landing; all 10 NASA payloads returned data through a full lunar day until the batteries ran out after sunset."
+    where: {name: "Mare Crisium, near Mons Latreille", lat: 18.567, lon: 61.817, precision: landed}
+    payloads: [Regolith Adherence Characterization, Next Generation Lunar Retroreflector, LEXI X-ray imager,
+               RadPC radiation-tolerant computer, Lunar Magnetotelluric Sounder, LISTER heat-flow drill, Lunar PlanetVac,
+               SCALPSS 1.1 plume cameras, Electrodynamic Dust Shield, Lunar GNSS Receiver Experiment]
+    sources: [https://en.wikipedia.org/wiki/Blue_Ghost_Mission_1, https://science.nasa.gov/lunar-science/clps-deliveries/]
+
+  - id: im-2
+    name: IM-2 · Athena
+    provider: Intuitive Machines
+    lander: Nova-C
+    task_order: PRIME-1
+    launch: "2025-02-27"
+    landing: "2025-03-06T17:29Z"
+    end: "2025-03-07"
+    status: failure
+    outcome: "An altimeter fault left the lander without accurate altitude; it hit a plateau, tipped over and came to rest in a crater, and its power ran out about 13 hours later."
+    site: im2-athena
+    where: {name: "Mons Mouton", lat: -84.7906, lon: 29.1958, precision: landed}
+    window: ["2025-03-06", "2025-03-20"]
+    payloads: [PRIME-1 ice-mining experiment (TRIDENT drill and MSolo mass spectrometer)]
+    sources: [https://en.wikipedia.org/wiki/IM-2, https://science.nasa.gov/lunar-science/clps-deliveries/]
+
+  - id: griffin-1
+    name: Griffin Mission One
+    provider: Astrobotic
+    lander: Griffin
+    task_order: TO20A
+    launch: "NET November 2026"
+    status: planned
+    outcome: "Originally meant to carry VIPER; now flies Astrolab’s FLIP rover and other commercial cargo to the south pole."
+    where: {name: "Nobile crater region", lat: -85.28, lon: 53.27, precision: region, radius_km: 40}
+    payloads: []
+    sources: [https://en.wikipedia.org/wiki/Griffin_Mission_One]
+
+  - id: im-3
+    name: IM-3
+    provider: Intuitive Machines
+    lander: Nova-C
+    task_order: CP-11
+    launch: "Early 2027"
+    status: planned
+    outcome: "To study the Reiner Gamma lunar swirl and its magnetic anomaly."
+    where: {name: "Reiner Gamma", lat: 7.5, lon: -59.0, precision: region, radius_km: 35}
+    payloads: [Lunar Vertex magnetometers and plasma spectrometer, CADRE autonomous rovers]
+    sources: [https://en.wikipedia.org/wiki/IM-3, https://science.nasa.gov/lunar-science/clps-deliveries/]
+
+  - id: blue-ghost-2
+    name: Blue Ghost Mission 2
+    provider: Firefly Aerospace
+    lander: Blue Ghost + Elytra
+    task_order: CS-3/4
+    launch: "NET December 2026"
+    status: planned
+    outcome: "Far-side landing with a relay satellite in lunar orbit."
+    where: {name: "Lunar far side", precision: none}
+    payloads: [LuSEE-Night radio telescope, JPL User Terminal]
+    sources: [https://en.wikipedia.org/wiki/Blue_Ghost_Mission_2, https://science.nasa.gov/lunar-science/clps-deliveries/]
+
+  - id: blue-moon-1
+    name: Blue Moon Pathfinder 1
+    provider: Blue Origin
+    lander: Blue Moon Mark 1
+    task_order: CT-3
+    launch: "NET Q1 2027"
+    status: planned
+    outcome: "First flight of the Mark 1 cargo lander to the south polar region."
+    where: {name: "Lunar south pole", precision: none}
+    payloads: [SCALPSS plume cameras, Laser Retroreflector Array]
+    sources: [https://en.wikipedia.org/wiki/Blue_Moon_Pathfinder_Mission_1, https://science.nasa.gov/lunar-science/clps-deliveries/]
+
+  - id: apex-1
+    name: APEX 1.0
+    provider: Draper / ispace-U.S.
+    lander: APEX 1.0
+    task_order: CP-12
+    launch: "TBD"
+    status: planned
+    outcome: "First NASA seismometers on the far side, inside the Schrödinger impact basin."
+    where: {name: "Schrödinger basin", lat: -75.0, lon: 132.4, precision: region, radius_km: 150}
+    payloads: [Farside Seismic Suite, Lunar Interior Temperature and Materials Suite, LuSEE-Lite]
+    sources: [https://science.nasa.gov/lunar-science/clps-deliveries/cp-12/]
+
+  - id: im-4
+    name: IM-4
+    provider: Intuitive Machines
+    lander: Nova-C
+    task_order: CP-22
+    launch: "2027"
+    status: planned
+    outcome: "Six NASA payloads to Mons Mouton near the south pole."
+    where: {name: "Mons Mouton", lat: -84.6, lon: 31.0, precision: region, radius_km: 50}
+    payloads: []
+    sources: [https://science.nasa.gov/lunar-science/clps-deliveries/]
+
+  - id: blue-moon-2
+    name: Blue Moon Pathfinder 2 · VIPER
+    provider: Blue Origin
+    lander: Blue Moon Mark 1
+    task_order: ""
+    launch: "NET late 2027"
+    status: planned
+    outcome: "Delivers NASA’s VIPER rover to hunt for water ice in the south polar region."
+    where: {name: "Lunar south pole", precision: none}
+    payloads: [VIPER rover]
+    sources: [https://en.wikipedia.org/wiki/Blue_Moon_Pathfinder_Mission_2]
+
+  - id: blue-ghost-3
+    name: Blue Ghost Mission 3
+    provider: Firefly Aerospace
+    lander: Blue Ghost
+    task_order: CP-21
+    launch: "2028"
+    status: planned
+    outcome: "To study the unusual silicic volcanic domes of Gruithuisen."
+    where: {name: "Gruithuisen Domes", lat: 36.56, lon: -40.72, precision: region, radius_km: 20}
+    payloads: [Lunar-VISE instruments]
+    sources: [https://en.wikipedia.org/wiki/Blue_Ghost_Mission_3, https://science.nasa.gov/lunar-science/clps-deliveries/]
+
+  - id: blue-ghost-4
+    name: Blue Ghost Mission 4
+    provider: Firefly Aerospace
+    lander: Blue Ghost
+    task_order: CS-6
+    launch: "2029"
+    status: planned
+    outcome: "Two rovers and science instruments to the rim of Haworth crater."
+    where: {name: "Haworth crater rim", lat: -86.77, lon: 337.14, precision: region, radius_km: 25}
+    payloads: []
+    sources: [https://en.wikipedia.org/wiki/Blue_Ghost_Mission_3, https://science.nasa.gov/lunar-science/clps-deliveries/]
+
+  - id: im-5
+    name: IM-5 · Nova-D
+    provider: Intuitive Machines
+    lander: Nova-D
+    task_order: CT-4
+    launch: "2030"
+    status: planned
+    outcome: "Larger Nova-D lander with NASA and partner payloads near Malapert crater."
+    where: {name: "Malapert crater", lat: -84.9, lon: 12.9, precision: region, radius_km: 35}
+    payloads: []
+    sources: [https://science.nasa.gov/lunar-science/clps-deliveries/]
+
+# Not CLPS, but landed near the pole: for context
+others:
+  - id: chandrayaan-3
+    name: Chandrayaan-3 · Vikram
+    provider: ISRO
+    lander: Vikram
+    launch: "2023-07-14"
+    landing: "2023-08-23T12:32Z"
+    end: "2023-09-03"
+    status: success
+    outcome: "India’s first soft landing; Vikram and the Pragyan rover worked through one lunar day and were put to sleep before sunset."
+    site: chandrayaan-3
+    where: {name: "Statio Shiv Shakti", lat: -69.37, lon: 32.32, precision: landed}
+    window: ["2023-08-23", "2023-09-25"]
+    payloads: []
+    sources: [https://en.wikipedia.org/wiki/Chandrayaan-3]
