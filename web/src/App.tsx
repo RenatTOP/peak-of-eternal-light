@@ -5,6 +5,8 @@ import { ComparePage, type CompareRow } from "./components/ComparePage";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { GoTo } from "./components/GoTo";
 import { ScenarioPanel, ScenarioTradeoff, type ScenarioRow } from "./components/ScenarioPanel";
+import { IntroCard, StoriesPage, StoryPlayer } from "./components/Stories";
+import { STORIES } from "./lib/stories";
 import { Head, Panel } from "./components/hud";
 import { MethodPage } from "./components/MethodPage";
 import { MissionsPage } from "./components/MissionsPage";
@@ -46,6 +48,7 @@ function run(data: AppData, obs: Observer, horizon: Horizon, start: number, days
 }
 
 const POWER_KEY = "pel.power";
+const INTRO_KEY = "pel.intro"; // intro already seen
 const SCENARIOS_KEY = "pel.scenarios";
 
 function savedScenarios(): Scenario[] {
@@ -165,6 +168,15 @@ export default function App() {
   const [scnPoints, setScnPoints] = useState<Map<string, PointHorizon | null>>(() => new Map());
   const scnLoading = useRef(new Set<string>());
   const [compareView, setCompareView] = useState<"sites" | "scenarios">("sites");
+  // story playing now, and the first-visit intro (without a link)
+  const [story, setStory] = useState<{ id: string; step: number } | null>(null);
+  const [intro, setIntro] = useState(() => {
+    try { return location.hash.length <= 1 && !localStorage.getItem(INTRO_KEY); } catch { return false; }
+  });
+  const closeIntro = () => {
+    setIntro(false);
+    try { localStorage.setItem(INTRO_KEY, "1"); } catch { /* not critical */ }
+  };
   const openCompare = (v: "sites" | "scenarios") => { setCompareView(v); setTab("compare"); };
 
   useEffect(() => {
@@ -267,15 +279,18 @@ export default function App() {
   }, [data, trav, picked, selected, byId, start, days]);
 
   useEffect(() => setCursor(0), [selectedId, picked, start, days, trav]);
-  const pendingAt = useRef<{ t: number; what: "site" | "point" | "route" } | null>(null);
+  // moment to put the cursor at once the panels show the right place from the right day (start)
+  const pendingAt = useRef<{ t: number; what: "site" | "point" | "route"; start: number } | null>(null);
+  const [pendingTick, setPendingTick] = useState(0); // same place and period: view doesn't change, the cursor still has to move
   useEffect(() => {
     const p = pendingAt.current;
     if (!p || !view || view.what !== p.what) return;
     const s = view.analysis.series;
+    if (Math.abs(s.t[0] - p.start) > 1) return; // panels still on the old period
     pendingAt.current = null;
     if (p.t < s.t[0] || p.t > s.t[s.t.length - 1]) return;
     setCursor(Math.round((p.t - s.t[0]) / s.stepMs));
-  }, [view]);
+  }, [view, pendingTick]);
 
   // --- horizon variants from terrain error: only for sites NASA provides clones for
   useEffect(() => {
@@ -546,7 +561,9 @@ export default function App() {
       setDays(Math.max(1, (Date.parse(m.window[1] + "T00:00:00Z") - t0) / DAY_MS));
     }
     const landed = m.landing ? Date.parse(m.landing) : NaN;
-    pendingAt.current = m.window && Number.isFinite(landed) ? { t: landed, what: m.site ? "site" : "point" } : null;
+    pendingAt.current = m.window && Number.isFinite(landed)
+      ? { t: landed, what: m.site ? "site" : "point", start: Math.max(Date.parse(m.window[0] + "T00:00:00Z"), data.ephem.start) } : null;
+    setPendingTick((k) => k + 1);
     if (m.site) openSite(m.site);
     else if (m.where.lat !== undefined && m.where.lon !== undefined) pickPoint(m.where.lat, m.where.lon);
   };
@@ -654,7 +671,8 @@ export default function App() {
     if (!data) return;
     const s = { ...SHARE_DEFAULTS, ...q };
     setPlaying(false);
-    setStart(Math.min(Math.max(s.start, data.ephem.start), data.ephem.end - 14 * DAY_MS));
+    const start0 = Math.min(Math.max(s.start, data.ephem.start), data.ephem.end - 14 * DAY_MS);
+    setStart(start0);
     setDays(s.days);
     setPower(s.power);
     setOverlays({ sun: s.layers.includes("sun"), earth: s.layers.includes("earth"), psr: s.layers.includes("psr") });
@@ -684,10 +702,22 @@ export default function App() {
     setTab(s.tab);
     setStage(s.stage === "view" || s.stage === "above" ? s.stage
       : s.route || (s.point && s.point[0] <= -60) ? "map" : s.point ? "globe" : s.stage);
-    pendingAt.current = s.at === null ? null : { t: s.at, what };
+    pendingAt.current = s.at === null ? null : { t: s.at, what, start: start0 };
+    setPendingTick((k) => k + 1);
   };
   const applyRef = useRef(applyShare);
   applyRef.current = applyShare;
+  // story: each step is a state in link format
+  const storyNow = story ? STORIES.find((x) => x.id === story.id) ?? null : null;
+  useEffect(() => {
+    if (!data || !story) return;
+    const st = STORIES.find((x) => x.id === story.id)?.steps[story.step];
+    if (st) applyRef.current(decodeShare("#" + st.hash));
+  }, [data, story]);
+  const playStory = (id: string) => {
+    closeIntro();
+    setStory({ id, step: 0 });
+  };
   const showMissionOnGlobe = (m: Mission) => {
     if (m.where.lat === undefined || m.where.lon === undefined) return;
     setGlobeFocus({ lat: m.where.lat, lon: m.where.lon, key: Date.now() });
@@ -954,6 +984,9 @@ export default function App() {
             </div>
           )}
           {card}
+          {intro && stage === "globe" && !story && !picked && (
+            <IntroCard onTour={() => playStory("light")} onStories={() => { closeIntro(); setTab("stories"); }} onClose={closeIntro} />
+          )}
           {(stage === "globe" || stage === "map") && !route?.drawing && (
             <GoTo key={stage} onGo={(lat, lon) => pickPoint(lat, lon)} style={{ top: stage === "map" ? 60 : 14 }} />
           )}
@@ -999,7 +1032,12 @@ export default function App() {
                         compareCount={scenarios.length} onOpenCompare={() => openCompare("scenarios")} />
         </main>
       )}
+      {tab === "stories" && <StoriesPage onPlay={playStory} />}
       {tab === "method" && <MethodPage />}
+      {storyNow && story && (
+        <StoryPlayer story={storyNow} step={story.step} onStep={(i) => setStory({ id: storyNow.id, step: i })}
+                     onClose={() => setStory(null)} />
+      )}
       <MobileNav tab={tab} onTab={setTab} />
     </div>
   );

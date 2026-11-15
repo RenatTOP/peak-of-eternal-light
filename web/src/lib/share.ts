@@ -4,7 +4,7 @@
 import { POWER_PRESETS, type PowerConfig } from "./power";
 import { decodeScenarios, encodeScenarios, type Scenario } from "./scenarios";
 
-export type ShareTab = "explore" | "compare" | "missions" | "method";
+export type ShareTab = "explore" | "stories" | "compare" | "missions" | "method";
 export type ShareLayer = "sun" | "earth" | "psr";
 export type ShareDrive = "continuous" | "battery" | "batteryEarth";
 
@@ -36,7 +36,7 @@ export const SHARE_DEFAULTS: ShareState = {
   scenarios: [],
 };
 
-const TABS: ShareTab[] = ["explore", "compare", "missions", "method"];
+const TABS: ShareTab[] = ["explore", "stories", "compare", "missions", "method"];
 const LAYERS: ShareLayer[] = ["sun", "earth", "psr"];
 const DRIVES: ShareDrive[] = ["continuous", "battery", "batteryEarth"];
 

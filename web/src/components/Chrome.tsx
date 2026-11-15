@@ -8,8 +8,10 @@ import { T } from "../lib/theme";
 import { Emblem, Head, Panel } from "./hud";
 import { Timeline } from "./Timeline";
 
-export type Tab = "explore" | "compare" | "missions" | "method";
-const TABS: [Tab, string][] = [["explore", "EXPLORE"], ["compare", "COMPARE"], ["missions", "MISSIONS"], ["method", "DATA & METHOD"]];
+export type Tab = "explore" | "stories" | "compare" | "missions" | "method";
+const TABS: [Tab, string][] = [
+  ["explore", "EXPLORE"], ["stories", "STORIES"], ["compare", "COMPARE"], ["missions", "MISSIONS"], ["method", "DATA & METHOD"],
+];
 
 export function Header({ tab, onTab, clock, onShare }: {
   tab: Tab; onTab: (t: Tab) => void; clock: number | null; onShare: () => Promise<boolean>;
