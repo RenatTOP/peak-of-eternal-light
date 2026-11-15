@@ -304,7 +304,7 @@ export class FarGrid {
   }
 
   /** Far horizon at a point for an observer at eyeZ (m above the sphere). */
-  async at(zoneName: string, x: number, y: number, eyeZ: number): Promise<{ elev: Float32Array; ground: number } | null> {
+  async at(zoneName: string, x: number, y: number, eyeZ: number): Promise<{ elev: Float32Array; dist: Float32Array; ground: number } | null> {
     const z = this.meta.zones[zoneName];
     const C = this.meta.chunk;
     const fi = (x - z.origin_m) / z.spacing_m;
@@ -321,6 +321,7 @@ export class FarGrid {
     const ratio = this.meta.far_max_m / lo;
     const sum = new Float64Array(z.n_az);
     const wsum = new Float64Array(z.n_az);
+    const dsum = new Float64Array(z.n_az);
     let ground = 0;
     let gw = 0;
     for (const [i, j, w] of corners) {
@@ -341,13 +342,18 @@ export class FarGrid {
         const d = lo * Math.pow(ratio, (code - 1) / 254);
         const rise = Math.tan((e / 100) * (Math.PI / 180)) * d - dh;
         sum[k] += (Math.atan2(rise, d) * 180 / Math.PI) * w;
+        dsum[k] += d * w;
         wsum[k] += w;
       }
     }
     if (gw < 1e-6) return null;
     const elev = new Float32Array(z.n_az);
-    for (let k = 0; k < z.n_az; k++) elev[k] = wsum[k] > 0 ? sum[k] / wsum[k] : -90;
-    return { elev, ground: ground / gw };
+    const dist = new Float32Array(z.n_az); // distance to the mountain giving this angle, m (0 = none)
+    for (let k = 0; k < z.n_az; k++) {
+      elev[k] = wsum[k] > 0 ? sum[k] / wsum[k] : -90;
+      dist[k] = wsum[k] > 0 ? dsum[k] / wsum[k] : 0;
+    }
+    return { elev, dist, ground: ground / gw };
   }
 }
 
