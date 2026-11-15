@@ -214,35 +214,64 @@ export function Globe({ data, selectedId, sunPctById, sunDir, earthDir, onPick, 
     const camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 100);
     camera.position.set(0, 0, DIST0);
 
-    // show the scene once all textures load: no frame with black caps
+    // Show the scene once all textures load: no frame with black caps.
+    // Small copies first (~0.6 MB), then the full ones (~5 MB) swap in one by one.
+    const upgrades: (() => void)[] = [];
+    let disposed = false;
     const loader = new THREE.TextureLoader(new THREE.LoadingManager(() => {
       setReady(true);
       render();
+      upgrades.splice(0).forEach((f) => f());
     }));
+    const hiLoader = new THREE.TextureLoader();
     const aniso = Math.min(8, renderer.capabilities.getMaxAnisotropy());
-    const tex = (file: string, srgb: boolean) => {
-      const t = loader.load(DATA_URL(file), () => render());
+    const lo = (file: string) => (data.globe?.lo ? file.replace(/(\.\w+)$/, "_lo$1") : file);
+    const setup = (t: THREE.Texture, srgb: boolean) => {
       if (srgb) t.colorSpace = THREE.SRGBColorSpace;
       t.anisotropy = aniso;
       return t;
     };
+    const tex = (file: string, srgb: boolean) => setup(loader.load(DATA_URL(lo(file)), () => render()), srgb);
+    /** After first show, the full texture replaces the small one (new object: different size). */
+    const upgrade = (mat: THREE.MeshStandardMaterial, key: "map" | "normalMap", file: string, srgb: boolean) => {
+      if (!data.globe?.lo) return;
+      upgrades.push(() => hiLoader.load(DATA_URL(file), (t) => {
+        if (disposed) return t.dispose();
+        const old = mat[key];
+        mat[key] = setup(t, srgb);
+        old?.dispose();
+        render();
+      }));
+    };
     const { caps, cap_fade_deg: fade = 2 } = data.globe;
+    const sphereMat = new THREE.MeshStandardMaterial({
+      map: tex(data.globe.color, true), normalMap: tex(data.globe.normal, false), roughness: 1, metalness: 0,
+    });
+    upgrade(sphereMat, "map", data.globe.color, true);
+    upgrade(sphereMat, "normalMap", data.globe.normal, false);
     const mesh = new THREE.Mesh(
       caps
         ? trimmedSphere((caps.north.colat_deg - fade) * D2R, Math.PI - (caps.south.colat_deg - fade) * D2R)
         : new THREE.SphereGeometry(1, 256, 180),
-      new THREE.MeshStandardMaterial({
-        map: tex(data.globe.color, true), normalMap: tex(data.globe.normal, false), roughness: 1, metalness: 0,
-      }),
+      sphereMat,
     );
     const moon = new THREE.Group();
     moon.add(mesh);
     for (const cap of caps ? [caps.south, caps.north] : []) {
-      const m = new THREE.Mesh(capGeometry(cap, fade), new THREE.MeshStandardMaterial({
+      const capMat = new THREE.MeshStandardMaterial({
         map: tex(cap.color, true), normalMap: tex(cap.normal, false), roughness: 1, metalness: 0,
         vertexColors: true, transparent: true,
         polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2, // above the sphere at the seam
-      }));
+      });
+      // full south cap first, it is the most visible
+      if (cap.sign < 0) {
+        upgrade(capMat, "normalMap", cap.normal, false);
+        upgrade(capMat, "map", cap.color, true);
+      } else {
+        upgrade(capMat, "map", cap.color, true);
+        upgrade(capMat, "normalMap", cap.normal, false);
+      }
+      const m = new THREE.Mesh(capGeometry(cap, fade), capMat);
       m.renderOrder = 1;
       moon.add(m);
     }
@@ -361,6 +390,7 @@ export function Globe({ data, selectedId, sunPctById, sunDir, earthDir, onPick, 
     if (import.meta.env.DEV) Object.assign(window, { __globe: { ...gl.current, THREE, toThree, unit } });
     resize();
     return () => {
+      disposed = true;
       ro.disconnect();
       renderer.dispose();
       gl.current = null;

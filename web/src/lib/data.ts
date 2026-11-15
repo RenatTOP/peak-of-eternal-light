@@ -49,6 +49,7 @@ export interface GlobeCap {
 export interface GlobeMeta {
   color: string;
   normal: string;
+  lo?: boolean; // has smaller <name>_lo.<ext> copies for a quick first show
   caps?: { south: GlobeCap; north: GlobeCap };
   cap_fade_deg?: number;
   lens: ImageLayer;
