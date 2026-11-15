@@ -32,6 +32,15 @@ interface Props {
   missions: Mission[]; // planned landing regions as dashed circles
   route: MapRoute | null; // rover route: drawing or result
   onRoute: (a: RouteAction) => void;
+  scan?: ScanDot[] | null; // around-this-spot points: brightness = Sun, ring = better, hollow = too steep
+}
+
+export interface ScanDot {
+  x: number;
+  y: number;
+  sunPct: number;
+  steep: boolean;
+  best: boolean;
 }
 
 export type RouteAction = { kind: "tool" | "undo" | "done" | "cancel" } | { kind: "add"; x: number; y: number };
@@ -101,6 +110,8 @@ export function PolarMap(props: Props) {
   const labels = useRef<L.LayerGroup | null>(null);
   const overlayLayers = useRef<Record<OverlayKey, L.LayerGroup> | null>(null);
   const focus = useRef<L.LayerGroup | null>(null);
+  const scanLayer = useRef<L.LayerGroup | null>(null);
+  const scanArea = useRef("");
   const handlers = useRef(props);
   handlers.current = props;
   const [scale, setScale] = useState<[number, number]>([10_000, 100]);
@@ -352,6 +363,39 @@ export function PolarMap(props: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, selectedId, selectedTag?.title, selectedTag?.line, picked?.x, picked?.y, pickedTag?.title, pickedTag?.line,
       pickedLink?.x, pickedLink?.y]);
+
+  // --- around-this-spot points
+  const scanKey = (props.scan ?? []).map((d) => `${d.x.toFixed(0)},${d.y.toFixed(0)},${d.sunPct.toFixed(1)},${+d.steep},${+d.best}`).join(";");
+  useEffect(() => {
+    const m = map.current;
+    if (!m) return;
+    if (!m.getPane("scan")) {
+      // own pane above the site close-up (overlayPane), otherwise the image hides the dots;
+      // the map may be recreated (StrictMode), and then so is the layer
+      m.createPane("scan").style.zIndex = "450";
+      scanLayer.current = L.layerGroup().addTo(m);
+    }
+    const g = scanLayer.current!;
+    g.clearLayers();
+    const renderer = L.canvas({ pane: "scan" });
+    for (const d of props.scan ?? []) {
+      L.circleMarker(ll(d.x, d.y), {
+        pane: "scan", renderer,
+        radius: d.best ? 6 : 4, weight: d.best ? 2 : 1, color: d.best ? T.text : d.steep ? T.muted : T.bg,
+        fill: !d.steep, fillColor: T.sun, fillOpacity: d.steep ? 0 : sunAlpha(d.sunPct), interactive: false,
+      }).addTo(g);
+    }
+    // new scan (another area, not another period): zoom the map to it
+    const sc = props.scan ?? [];
+    const area = sc.length ? `${sc[0].x.toFixed(0)},${sc[0].y.toFixed(0)},${sc[sc.length - 1].x.toFixed(0)}` : "";
+    if (area && area !== scanArea.current && el.current && el.current.clientWidth > 0) {
+      const b = L.latLngBounds(sc.map((d) => ll(d.x, d.y)));
+      m.flyToBounds(b.pad(0.8), { duration: 0.8, maxZoom: 11 });
+    }
+    scanArea.current = area;
+    // value dependency: App rebuilds the array every playback frame
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanKey]);
 
   const zoom = (d: number) => map.current?.setZoom((map.current.getZoom() ?? 6) + d);
   const mouseLL = mouse && xyToLatLon(mouse[0], mouse[1]);

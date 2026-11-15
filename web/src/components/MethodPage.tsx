@@ -29,6 +29,10 @@ export function MethodPage() {
               where it is at each moment. Driving draws the operating load, in shadow from the battery; at 30% charge the
               rover parks to recharge and moves on at 80%, or, if it is steered from Earth, it also waits for Earth to rise.
               A year of departure dates shows when the traverse gets through and when the battery empties on the way.</li>
+            <li><b>Around this spot</b>: 37 points in three hexagonal rings within 0.5–5 km each get their own traced
+              horizon, run over the chosen period and craft. The spread is how much the result depends on where exactly
+              the lander comes down; better spots must gain at least 2 points of energy (or 6 hours of night) and have a
+              slope of 10° or less, measured on the same 80–120 m (or 474 m) terrain, so real slopes can only be steeper.</li>
             <li><b>Scenarios</b>: each pinned place and date range is run through exactly the same horizon, sky and
               power model as EXPLORE, with the craft set in POWER CHECK, and laid out by days since its own start, so a
               January and a July landing, or two different missions, line up side by side.</li>

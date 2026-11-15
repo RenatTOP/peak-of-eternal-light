@@ -6,6 +6,8 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { GoTo } from "./components/GoTo";
 import { ScenarioPanel, ScenarioTradeoff, type ScenarioRow } from "./components/ScenarioPanel";
 import { IntroCard, StoriesPage, StoryPlayer } from "./components/Stories";
+import { NearbyCard, type NearbyState } from "./components/NearbyCard";
+import { hexSpots, slopeAt, summarize, type Goal, type ScanPoint, type Scored } from "./lib/nearby";
 import { STORIES } from "./lib/stories";
 import { Head, Panel } from "./components/hud";
 import { MethodPage } from "./components/MethodPage";
@@ -24,6 +26,7 @@ import type { Landmark, ViewReadout, ViewTarget } from "./components/SiteView3D"
 import { analyze, computeSeries, computeTrack, latLonToXY, xyToLatLon, type Analysis, type Horizon, type Observer } from "./lib/astro";
 import { loadAppData, loadClones, loadVisMap, type AppData, type LoadStep, type Mission, type SiteInfo } from "./lib/data";
 import { batteryNeeded, generation, POWER_PRESETS, simulate, type PowerConfig } from "./lib/power";
+import type { ScanDot } from "./components/PolarMap";
 import { terrainSpread } from "./lib/spread";
 import { eventText, nextEvent } from "./lib/events";
 import {
@@ -168,6 +171,11 @@ export default function App() {
   const [scnPoints, setScnPoints] = useState<Map<string, PointHorizon | null>>(() => new Map());
   const scnLoading = useRef(new Set<string>());
   const [compareView, setCompareView] = useState<"sites" | "scenarios">("sites");
+  // around this spot: radius, goal and scanned points (horizons; numbers follow the period and craft)
+  const [nbRadius, setNbRadius] = useState(1000);
+  const [nbGoal, setNbGoal] = useState<Goal>("sun");
+  const [scan, setScan] = useState<{ key: string; done: number; total: number; points: ScanPoint[] | null; failed: boolean } | null>(null);
+  const scanToken = useRef(0);
   // story playing now, and the first-visit intro (without a link)
   const [story, setStory] = useState<{ id: string; step: number } | null>(null);
   const [intro, setIntro] = useState(() => {
@@ -367,6 +375,15 @@ export default function App() {
       return { key, label, sub, status: "ok" as const, out: outcome(run(data, obs, horizon, sc.start, sc.days), horizon, powerLazy) };
     });
   }, [data, scenarios, scnPoints, powerLazy]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // --- around this spot: numbers for each scanned point over the current period and craft
+  const scanScored = useMemo((): Scored[] | null => {
+    if (!data || !scan?.points) return null;
+    return scan.points.map((p) => {
+      const a = run(data, { lat: p.lat, lon: p.lon, elevM: p.groundZ + p.heightM }, p.horizon, start, days);
+      return { ...p, metrics: a.metrics, survives: simulate(a.series, powerLazy).survives };
+    });
+  }, [data, scan, start, days, powerLazy]);
   const cloneFor = view?.what === "site" && selected && data?.clones?.sites[selected.id] ? selected.id : null;
   const spread = useMemo(() => {
     if (!data || !cloneFor || !selected || clones?.id !== cloneFor) return null;
@@ -766,6 +783,51 @@ export default function App() {
     </div>
   );
 
+  // --- around this spot: 37 points within the radius, each with its own horizon and slope
+  const nbCentre = view?.what === "site" && selected ? { lat: selected.lat, lon: selected.lon }
+    : view?.what === "point" && picked?.point ? { lat: picked.lat, lon: picked.lon } : null;
+  const nbKey = nbCentre ? `${nbCentre.lat.toFixed(5)},${nbCentre.lon.toFixed(5)}|${nbRadius}` : "";
+  const nbPolar = !!nbCentre && nbCentre.lat <= -60;
+  const runScan = async () => {
+    if (!nbCentre) return;
+    const key = nbKey;
+    const token = ++scanToken.current;
+    const spots = hexSpots(nbCentre.lat, nbCentre.lon, nbRadius);
+    setScan({ key, done: 0, total: spots.length, points: null, failed: false });
+    const pts: ScanPoint[] = [];
+    for (const sp of spots) {
+      const h = await horizonOf({ kind: "point", lat: sp.lat, lon: sp.lon }).catch(() => null);
+      if (scanToken.current !== token) return; // place changed or a new scan started
+      if (h) {
+        // slope from the same terrain as the horizon; its tiles are already loaded
+        const polar = sp.lat <= -60 && data.anyPoint;
+        const height = polar
+          ? (la: number, lo: number) => { const [x, y] = latLonToXY(la, lo); return data.anyPoint!.terrain.height(["n80", "n120"], x, y); }
+          : (la: number, lo: number) => data.globalPoint?.terrain.sample("g64", la, lo) ?? NaN;
+        pts.push({ ...sp, horizon: h.horizon, groundZ: h.groundZ, heightM: h.heightM, slope: slopeAt(height, sp.lat, sp.lon, polar ? 80 : 474) });
+      }
+      setScan((c) => (c && c.key === key ? { ...c, done: c.done + 1 } : c));
+    }
+    setScan({ key, done: spots.length, total: spots.length, points: pts, failed: pts.length === 0 });
+  };
+  const scanHere = scan && scan.key === nbKey ? scan : null;
+  const nbSummary = scanHere?.points && scanScored ? summarize(scanScored, nbGoal) : null;
+  const nbCentreScored = scanScored?.find((p) => p.dist === 0) ?? null;
+  const nbState: NearbyState = !scanHere ? { status: "idle" }
+    : scanHere.failed ? { status: "failed" }
+    : !scanHere.points ? { status: "running", done: scanHere.done, total: scanHere.total }
+    : nbSummary && nbCentreScored ? { status: "done", summary: nbSummary, centre: nbCentreScored, values: scanScored!.map((p) => p.metrics.sunMeanPct) }
+    : { status: "failed" };
+  const nearbyCard = nbCentre && (
+    <NearbyCard radius={nbRadius} onRadius={setNbRadius} goal={nbGoal} onGoal={setNbGoal} state={nbState} onScan={runScan}
+                onOpen={(la, lo) => pickPoint(la, lo)} terrain={nbPolar ? "80–120 m LOLA terrain" : "the 474 m global LOLA map"} />
+  );
+  // scan dots on the polar map
+  const scanDots: ScanDot[] | null = nbPolar && nbState.status === "done" && scanScored ? scanScored.map((p) => {
+    const [x, y] = latLonToXY(p.lat, p.lon);
+    return { x, y, sunPct: p.metrics.sunMeanPct, steep: p.slope !== null && p.slope > 10, best: nbSummary!.best.includes(p) };
+  }) : null;
+
   const landingCard = scanSubject && (
     <LandingCard days={landingFor(scanSubject.key)} missionDays={missionDays} onMissionDays={setMissionDays}
                  current={start} onPick={landOn} />
@@ -812,7 +874,7 @@ export default function App() {
                   list={nearLandings.filter((r) => r.m !== atLanding).slice(0, 4).map(({ m: x, d }) => ({
                     id: x.id, name: x.name, pct: NaN, extra: `${Math.round(d / 1000).toLocaleString("en-US")} km`, on: false,
                   }))}
-                  actions={pinRow} power={powerCard} landing={landingCard}
+                  actions={pinRow} power={powerCard} landing={landingCard} nearby={nearbyCard}
                   onSelect={(id) => { const x = missionsList.find((q) => q.id === id); if (x) analyseMission(x); }}
                   onCompare={() => setTab("compare")} compareCount={data.sites.length} />
       );
@@ -826,7 +888,7 @@ export default function App() {
                   coords={`${fmtLat(picked.lat)} ${fmtLon(picked.lon)} · ${Math.round(p.groundZ)} m`}
                   notice={`Computed for this exact spot: terrain within ${Math.round(p.nearRadiusM / 1000)} km from ${p.nearDem}, ` +
                     `distant mountains from a ${p.farSpacingM / 1000} km grid. Catalog sites use 5 m terrain, so small ridges and boulders may be missing here.`}
-                  metrics={m} periodDays={days} listTitle="NEAREST SITES" list={list} actions={pinRow} power={powerCard} landing={landingCard}
+                  metrics={m} periodDays={days} listTitle="NEAREST SITES" list={list} actions={pinRow} power={powerCard} landing={landingCard} nearby={nearbyCard}
                   onSelect={openSite} onCompare={() => setTab("compare")} compareCount={data.sites.length} />
       );
     } else if (selected) {
@@ -839,7 +901,7 @@ export default function App() {
                   coords={`${fmtLat(selected.lat)} ${fmtLon(selected.lon)} · ${Math.round(selected.ground_z)} m`}
                   metrics={m} periodDays={days} listTitle="SITES · SOLAR ENERGY"
                   list={top.map((r) => ({ id: r.site.id, name: r.site.name, pct: r.analysis.metrics.sunMeanPct, on: r.site.id === selected.id }))}
-                  spread={spread} actions={pinRow} power={powerCard} landing={landingCard}
+                  spread={spread} actions={pinRow} power={powerCard} landing={landingCard} nearby={nearbyCard}
                   onSelect={openSite} onCompare={() => setTab("compare")} compareCount={data.sites.length} />
       );
     }
@@ -945,7 +1007,7 @@ export default function App() {
                         picked={picked?.zone === "polar" ? { x: picked.x, y: picked.y } : null}
                         pickedTag={picked?.zone === "polar" ? { title: "SELECTED POINT", line: `${fmtLat(picked.lat)} ${fmtLon(picked.lon)}` } : null}
                         pickedLink={picked?.status === "ok" && nearest[0] ? { x: nearest[0].s.x, y: nearest[0].s.y } : null}
-                        missions={missionsList} route={mapRoute} onRoute={onRoute} onView3D={route?.drawing || !open3d ? null : () => open3d()} />
+                        missions={missionsList} route={mapRoute} onRoute={onRoute} scan={route ? null : scanDots} onView3D={route?.drawing || !open3d ? null : () => open3d()} />
             </div>
           )}
           {in3d && (

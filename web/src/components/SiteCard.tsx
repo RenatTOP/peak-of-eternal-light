@@ -33,6 +33,7 @@ interface Props {
   actions?: ReactNode; // e.g. "add to comparison"
   power?: ReactNode;
   landing?: ReactNode; // best landing dates
+  nearby?: ReactNode; // sensitivity to the exact spot and better spots nearby
 }
 
 const days = (h: number) => (h >= 48 ? `${(h / 24).toFixed(1)} d` : `${Math.round(h)} h`);
@@ -81,6 +82,7 @@ export function SiteCard(p: Props) {
       {p.note && <p className="note">{p.note}</p>}
       {p.power}
       {p.landing}
+      {p.nearby}
       <div style={{ marginTop: 10 }}><Head label={p.listTitle} /></div>
       <div className="rank">
         {p.list.map((r) => (
