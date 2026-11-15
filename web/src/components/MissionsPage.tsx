@@ -54,9 +54,13 @@ interface Props {
   onSelect: (id: string) => void;
   onAnalyse: (m: Mission) => void;
   onGlobe: (m: Mission) => void;
+  onCompare: (m: Mission) => void; // add the mission's place and dates to the scenario comparison
+  compared: (m: Mission) => boolean;
+  compareCount: number;
+  onOpenCompare: () => void;
 }
 
-export function MissionsPage({ data, selectedId, onSelect, onAnalyse, onGlobe }: Props) {
+export function MissionsPage({ data, selectedId, onSelect, onAnalyse, onGlobe, onCompare, compared, compareCount, onOpenCompare }: Props) {
   const [filter, setFilter] = useState<Filter>("clps");
   const card = useRef<HTMLDivElement>(null);
   // on phones the card is below the list; scroll to it after a pick
@@ -140,7 +144,19 @@ export function MissionsPage({ data, selectedId, onSelect, onAnalyse, onGlobe }:
             </button>
           )}
           {m.where.lat !== undefined && <button className="btn" onClick={() => onGlobe(m)}>Show on the globe</button>}
+          {hasPlace(m) && (
+            <button className="btn" disabled={compared(m)} onClick={() => onCompare(m)}
+                    title={m.window ? "Compare this landing site over the mission dates with other scenarios"
+                      : "Compare this place over the dates currently set in EXPLORE"}>
+              {compared(m) ? "✓ In comparison" : "+ Add to comparison"}
+            </button>
+          )}
         </div>
+        {compareCount > 0 && (
+          <button className="link" style={{ marginTop: 8 }} onClick={onOpenCompare}>
+            Compare {compareCount} scenario{compareCount > 1 ? "s" : ""} →
+          </button>
+        )}
         {hasPlace(m) && !atPole(m) && (
           <p className="mnote">Away from the pole the horizon comes from the global LOLA map (474 m), so local sunrise and sunset can be off by an hour or two.</p>
         )}

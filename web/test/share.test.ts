@@ -8,6 +8,7 @@ const full: ShareState = {
   start: Date.UTC(2027, 0, 8), days: 30, at: Date.UTC(2027, 0, 9, 4, 10),
   power: POWER_PRESETS.find((p) => p.id === "rover")!.cfg, layers: ["sun", "psr"], mission: null, missionDays: 14,
   route: { way: [[-89.78, 203.8], [-89.6, 210.1234], [-89.439, 222.9]], pins: [0, 2], mode: "batteryEarth", speed: 300, example: true },
+  scenarios: [],
 };
 
 describe("share link", () => {
@@ -23,7 +24,7 @@ describe("share link", () => {
     expect(h).toContain("at=2027-01-09T04:10");
     const back = decodeShare("#" + h);
     // defaults (tab, no place or mission) aren't written to the address, so they don't come back
-    const { tab: _t, site: _s, point: _p, mission: _m, ...rest } = full;
+    const { tab: _t, site: _s, point: _p, mission: _m, scenarios: _sc, ...rest } = full;
     expect(back).toEqual(rest);
   });
 
@@ -47,6 +48,17 @@ describe("share link", () => {
   it("ignores junk instead of breaking", () => {
     const q = decodeShare("#tab=hack&site=<script>&pt=12,500&route=1,2&days=-5&from=yesterday&craft=ufo&pw=1,2,3&layers=sun,x&mdays=9999");
     expect(q).toEqual({ layers: ["sun"] });
+  });
+
+  it("carries the scenario comparison only on the COMPARE page", () => {
+    const scenarios = [
+      { place: { kind: "site" as const, id: "connecting-ridge" }, start: Date.UTC(2027, 0, 1), days: 29.53 },
+      { place: { kind: "point" as const, lat: 18.567, lon: 61.817 }, start: Date.UTC(2025, 2, 2), days: 16 },
+    ];
+    const h = encodeShare({ ...SHARE_DEFAULTS, tab: "compare", scenarios });
+    expect(h).toBe("tab=compare&sc=connecting-ridge@2027-01-01~29.53;18.567,61.817@2025-03-02~16");
+    expect(decodeShare("#" + h).scenarios).toEqual(scenarios);
+    expect(encodeShare({ ...SHARE_DEFAULTS, scenarios })).toBe("");
   });
 
   it("keeps a point anywhere on the Moon, not only in the south", () => {

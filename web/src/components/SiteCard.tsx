@@ -30,6 +30,7 @@ interface Props {
   onCompare: () => void;
   compareCount: number;
   spread?: Spread | null; // spread from terrain error (only sites with clones)
+  actions?: ReactNode; // e.g. "add to comparison"
   power?: ReactNode;
   landing?: ReactNode; // best landing dates
 }
@@ -76,6 +77,7 @@ export function SiteCard(p: Props) {
           <span>night {days(p.spread.nightMaxH[0])}–{days(p.spread.nightMaxH[1])}</span>
         </div>
       )}
+      {p.actions}
       {p.note && <p className="note">{p.note}</p>}
       {p.power}
       {p.landing}

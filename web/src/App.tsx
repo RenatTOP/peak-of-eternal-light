@@ -4,6 +4,7 @@ import { Boot, Header, MobileNav, TimeBar, type Tab } from "./components/Chrome"
 import { ComparePage, type CompareRow } from "./components/ComparePage";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { GoTo } from "./components/GoTo";
+import { ScenarioPanel, ScenarioTradeoff, type ScenarioRow } from "./components/ScenarioPanel";
 import { Head, Panel } from "./components/hud";
 import { MethodPage } from "./components/MethodPage";
 import { MissionsPage } from "./components/MissionsPage";
@@ -23,7 +24,10 @@ import { loadAppData, loadClones, loadVisMap, type AppData, type LoadStep, type 
 import { batteryNeeded, generation, POWER_PRESETS, simulate, type PowerConfig } from "./lib/power";
 import { terrainSpread } from "./lib/spread";
 import { eventText, nextEvent } from "./lib/events";
-import { autoStepMs, DAY_MS, fmtLat, fmtLon, HOUR_MS } from "./lib/format";
+import {
+  addScenario, decodeScenarios, encodeScenarios, outcome, placeKey, scenarioKey, type Place, type Scenario,
+} from "./lib/scenarios";
+import { autoStepMs, DAY_MS, fmtDate, fmtLat, fmtLon, HOUR_MS } from "./lib/format";
 import {
   departureScan, routeExposure, routeHorizons, routeLength, routeSlopes, sampleRoute, simulateTraverse,
   type Departure, type RouteHorizons, type TraverseConfig, type XY,
@@ -42,6 +46,17 @@ function run(data: AppData, obs: Observer, horizon: Horizon, start: number, days
 }
 
 const POWER_KEY = "pel.power";
+const SCENARIOS_KEY = "pel.scenarios";
+
+function savedScenarios(): Scenario[] {
+  try {
+    return decodeScenarios(localStorage.getItem(SCENARIOS_KEY) ?? "");
+  } catch {
+    return [];
+  }
+}
+
+const fmtDays = (d: number) => (Math.abs(d - 29.53) < 0.01 ? "lunar day" : `${+d.toFixed(1)} d`);
 const NO_MISSIONS: Mission[] = [];
 
 function savedPower(): PowerConfig {
@@ -145,10 +160,19 @@ export default function App() {
   traceRef.current = trace;
   const [travCfg, setTravCfg] = useState<TraverseConfig>({ speedMh: 250, mode: "battery" });
   const [missionDays, setMissionDays] = useState(29.53); // mission length for best landing dates
+  const [scenarios, setScenarios] = useState<Scenario[]>(savedScenarios);
+  // scenario point horizons: undefined = computing, null = failed
+  const [scnPoints, setScnPoints] = useState<Map<string, PointHorizon | null>>(() => new Map());
+  const scnLoading = useRef(new Set<string>());
+  const [compareView, setCompareView] = useState<"sites" | "scenarios">("sites");
+  const openCompare = (v: "sites" | "scenarios") => { setCompareView(v); setTab("compare"); };
 
   useEffect(() => {
     try { localStorage.setItem(POWER_KEY, JSON.stringify(power)); } catch { /* not critical */ }
   }, [power]);
+  useEffect(() => {
+    try { localStorage.setItem(SCENARIOS_KEY, encodeScenarios(scenarios)); } catch { /* not critical */ }
+  }, [scenarios]);
 
   useEffect(() => {
     loadAppData((s) => setLoaded((prev) => new Set(prev).add(s))).then(setData).catch((e) => setError(String(e)));
@@ -279,6 +303,55 @@ export default function App() {
 
   // terrain spread: 100 runs; craft parameters deferred so typing stays smooth
   const powerLazy = useDeferredValue(power);
+
+  // --- comparison scenarios: point horizons in the background, then the same calculation as EXPLORE
+  const horizonOf = (p: Place): Promise<PointHorizon | null> => {
+    if (p.kind !== "point" || !data) return Promise.resolve(null);
+    if (p.lat <= -60) {
+      const [x, y] = latLonToXY(p.lat, p.lon);
+      return data.anyPoint ? data.anyPoint.horizon(x, y) : Promise.resolve(null);
+    }
+    return data.globalPoint ? data.globalPoint.horizon(p.lat, p.lon) : Promise.resolve(null);
+  };
+  useEffect(() => {
+    if (!data) return;
+    for (const sc of scenarios) {
+      const k = placeKey(sc.place);
+      if (sc.place.kind !== "point" || scnPoints.has(k) || scnLoading.current.has(k)) continue;
+      scnLoading.current.add(k);
+      horizonOf(sc.place).catch(() => null).then((h) => {
+        scnLoading.current.delete(k);
+        setScnPoints((m) => new Map(m).set(k, h));
+      });
+    }
+  }, [data, scenarios]); // eslint-disable-line react-hooks/exhaustive-deps
+  const landingNear = (lat: number, lon: number) => (data?.missions?.missions ?? NO_MISSIONS).find((x) =>
+    x.where.lat !== undefined && x.where.lon !== undefined && x.where.precision !== "region"
+    && greatCircleM(lat, lon, x.where.lat, x.where.lon) < 1000) ?? null;
+  const scnRows = useMemo((): ScenarioRow[] => {
+    if (!data) return [];
+    return scenarios.map((sc) => {
+      const key = scenarioKey(sc);
+      const p = sc.place;
+      const site = p.kind === "site" ? data.sites.find((x) => x.id === p.id) : undefined;
+      const label = p.kind === "site" ? site?.name ?? p.id : landingNear(p.lat, p.lon)?.name ?? `${fmtLat(p.lat)} ${fmtLon(p.lon)}`;
+      const sub = `${fmtDate(sc.start)} · ${fmtDays(sc.days)}` + (p.kind === "point" && landingNear(p.lat, p.lon) ? "" : p.kind === "point" ? " · point" : "");
+      let obs: Observer, horizon: Horizon;
+      if (site) {
+        obs = siteObserver(site);
+        horizon = data.horizons.get(site.id)!;
+      } else if (p.kind === "point") {
+        const h = scnPoints.get(placeKey(p));
+        if (h === undefined) return { key, label, sub, status: "loading" as const };
+        if (h === null) return { key, label, sub, status: "failed" as const };
+        obs = { lat: p.lat, lon: p.lon, elevM: h.groundZ + h.heightM };
+        horizon = h.horizon;
+      } else {
+        return { key, label, sub, status: "failed" as const };
+      }
+      return { key, label, sub, status: "ok" as const, out: outcome(run(data, obs, horizon, sc.start, sc.days), horizon, powerLazy) };
+    });
+  }, [data, scenarios, scnPoints, powerLazy]); // eslint-disable-line react-hooks/exhaustive-deps
   const cloneFor = view?.what === "site" && selected && data?.clones?.sites[selected.id] ? selected.id : null;
   const spread = useMemo(() => {
     if (!data || !cloneFor || !selected || clones?.id !== cloneFor) return null;
@@ -385,6 +458,7 @@ export default function App() {
         pins: pins && pins.every((i) => i >= 0) ? pins : null,
         mode: travCfg.mode, speed: travCfg.speedMh, example: route.example,
       } : null,
+      scenarios: compareView === "scenarios" ? scenarios : [],
     };
   };
   const hash = shareReady.current ? encodeShare(shareState()) : null;
@@ -476,6 +550,40 @@ export default function App() {
     if (m.site) openSite(m.site);
     else if (m.where.lat !== undefined && m.where.lon !== undefined) pickPoint(m.where.lat, m.where.lon);
   };
+  // --- scenarios: add, open, remove
+  const round5 = (v: number) => Math.round(v * 1e5) / 1e5;
+  const pin = (sc: Scenario, h?: PointHorizon) => {
+    if (h) setScnPoints((m) => new Map(m).set(placeKey(sc.place), h));
+    setScenarios((list) => addScenario(list, sc));
+  };
+  const missionScenario = (m: Mission): Scenario | null => {
+    const place: Place | null = m.site ? { kind: "site", id: m.site }
+      : m.where.lat !== undefined && m.where.lon !== undefined ? { kind: "point", lat: m.where.lat, lon: m.where.lon } : null;
+    if (!place || !data) return null;
+    if (!m.window) return { place, start, days };
+    const t0 = Math.max(Date.parse(m.window[0] + "T00:00:00Z"), data.ephem.start);
+    return { place, start: t0, days: Math.max(1, (Date.parse(m.window[1] + "T00:00:00Z") - t0) / DAY_MS) };
+  };
+  const openScenario = (key: string) => {
+    const sc = scenarios.find((x) => scenarioKey(x) === key);
+    if (!sc || !data) return;
+    setPlaying(false);
+    setStart(Math.max(sc.start, data.ephem.start));
+    setDays(sc.days);
+    if (sc.place.kind === "site") openSite(sc.place.id);
+    else pickPoint(sc.place.lat, sc.place.lon);
+  };
+  const scnExamples = [
+    { label: "Landings since 2023", note: "Chandrayaan-3, SLIM, IM-1, Blue Ghost 1 and IM-2 over their own mission dates",
+      add: () => {
+        const ms = ["chandrayaan-3", "slim", "im-1", "blue-ghost-1", "im-2"]
+          .map((id) => data?.missions?.missions.find((m) => m.id === id)).filter((m): m is Mission => !!m);
+        setScenarios(ms.map(missionScenario).filter((x): x is Scenario => !!x));
+      } },
+    { label: "One site, four seasons", note: "Connecting Ridge for a lunar day starting in January, April, July and October 2027",
+      add: () => setScenarios([0, 3, 6, 9].map((mo) => ({ place: { kind: "site", id: "connecting-ridge" }, start: Date.UTC(2027, mo, 1), days: 29.53 }))) },
+  ];
+
   // route: a whole year is too long for a rover, show ~six weeks
   const fitPeriod = () => { if (days > 90) setDays(30); };
   const startRoute = (way: XY[] = [], example = false) => {
@@ -552,6 +660,10 @@ export default function App() {
     setOverlays({ sun: s.layers.includes("sun"), earth: s.layers.includes("earth"), psr: s.layers.includes("psr") });
     setMissionDays(s.missionDays);
     if (s.mission && data.missions?.missions.some((m) => m.id === s.mission)) setMissionId(s.mission);
+    if (q.scenarios) { // without sc= in the link keep the saved ones
+      setScenarios(q.scenarios);
+      setCompareView("scenarios");
+    }
     let what: "site" | "point" | "route" = "site";
     if (s.route) {
       const way = s.route.way.map(([la, lo]) => latLonToXY(la, lo));
@@ -605,6 +717,25 @@ export default function App() {
     setStart(t);
     setDays(missionDays);
   };
+  // current place with its dates as a comparison scenario
+  const curScenario: Scenario | null = view?.what === "site" && selected ? { place: { kind: "site", id: selected.id }, start, days }
+    : view?.what === "point" && picked?.point ? { place: { kind: "point", lat: round5(picked.lat), lon: round5(picked.lon) }, start, days }
+    : null;
+  const curPinned = !!curScenario && scenarios.some((x) => scenarioKey(x) === scenarioKey(curScenario));
+  const pinRow = curScenario && (
+    <div className="pin-row">
+      <button className="btn" disabled={curPinned} onClick={() => pin(curScenario, picked?.point)}
+              title="Keep this place with these dates to compare against others on the COMPARE page">
+        {curPinned ? "✓ In comparison" : "+ Add to comparison"}
+      </button>
+      {scenarios.length > 0 && (
+        <button className="link" onClick={() => openCompare("scenarios")}>
+          Compare {scenarios.length} scenario{scenarios.length > 1 ? "s" : ""} →
+        </button>
+      )}
+    </div>
+  );
+
   const landingCard = scanSubject && (
     <LandingCard days={landingFor(scanSubject.key)} missionDays={missionDays} onMissionDays={setMissionDays}
                  current={start} onPick={landOn} />
@@ -651,7 +782,7 @@ export default function App() {
                   list={nearLandings.filter((r) => r.m !== atLanding).slice(0, 4).map(({ m: x, d }) => ({
                     id: x.id, name: x.name, pct: NaN, extra: `${Math.round(d / 1000).toLocaleString("en-US")} km`, on: false,
                   }))}
-                  power={powerCard} landing={landingCard}
+                  actions={pinRow} power={powerCard} landing={landingCard}
                   onSelect={(id) => { const x = missionsList.find((q) => q.id === id); if (x) analyseMission(x); }}
                   onCompare={() => setTab("compare")} compareCount={data.sites.length} />
       );
@@ -665,7 +796,7 @@ export default function App() {
                   coords={`${fmtLat(picked.lat)} ${fmtLon(picked.lon)} · ${Math.round(p.groundZ)} m`}
                   notice={`Computed for this exact spot: terrain within ${Math.round(p.nearRadiusM / 1000)} km from ${p.nearDem}, ` +
                     `distant mountains from a ${p.farSpacingM / 1000} km grid. Catalog sites use 5 m terrain, so small ridges and boulders may be missing here.`}
-                  metrics={m} periodDays={days} listTitle="NEAREST SITES" list={list} power={powerCard} landing={landingCard}
+                  metrics={m} periodDays={days} listTitle="NEAREST SITES" list={list} actions={pinRow} power={powerCard} landing={landingCard}
                   onSelect={openSite} onCompare={() => setTab("compare")} compareCount={data.sites.length} />
       );
     } else if (selected) {
@@ -678,7 +809,7 @@ export default function App() {
                   coords={`${fmtLat(selected.lat)} ${fmtLon(selected.lon)} · ${Math.round(selected.ground_z)} m`}
                   metrics={m} periodDays={days} listTitle="SITES · SOLAR ENERGY"
                   list={top.map((r) => ({ id: r.site.id, name: r.site.name, pct: r.analysis.metrics.sunMeanPct, on: r.site.id === selected.id }))}
-                  spread={spread} power={powerCard} landing={landingCard}
+                  spread={spread} actions={pinRow} power={powerCard} landing={landingCard}
                   onSelect={openSite} onCompare={() => setTab("compare")} compareCount={data.sites.length} />
       );
     }
@@ -833,19 +964,39 @@ export default function App() {
         {tab === "explore" && timebar}
       </main>
       {tab === "compare" && (
-        <main className="compare">
-          <ComparePage rows={rows} selectedId={selectedId} onOpen={openSite} period={periodLabel(start, days)}
-                       landing={Object.fromEntries(data.sites.map((s) => [s.id, landingFor(s.id)]))} missionDays={missionDays}
-                       onMissionDays={setMissionDays} current={start}
-                       onOpenAt={(id, t) => { openSite(id); landOn(t); }}
-                       battery={batteryById} craft={POWER_PRESETS.find((p) => JSON.stringify(p.cfg) === JSON.stringify(power))?.label.toLowerCase() ?? "custom craft"} />
-          {timebar}
+        <main className={`compare ${compareView}`}>
+          <div className="seg compare-switch" role="tablist" aria-label="What to compare">
+            <button role="tab" aria-selected={compareView === "sites"} className={compareView === "sites" ? "on" : ""}
+                    onClick={() => setCompareView("sites")}>Catalog sites · {data.sites.length}</button>
+            <button role="tab" aria-selected={compareView === "scenarios"} className={compareView === "scenarios" ? "on" : ""}
+                    onClick={() => setCompareView("scenarios")}>Your scenarios · {scenarios.length}</button>
+          </div>
+          {compareView === "scenarios" ? (
+            <>
+              <ScenarioPanel rows={scnRows} onOpen={openScenario} examples={scnExamples}
+                             onRemove={(k) => setScenarios((l) => l.filter((x) => scenarioKey(x) !== k))} onClear={() => setScenarios([])}
+                             craft={POWER_PRESETS.find((p) => JSON.stringify(p.cfg) === JSON.stringify(power))?.label.toLowerCase() ?? "custom craft"} />
+              <ScenarioTradeoff rows={scnRows} onOpen={openScenario} />
+            </>
+          ) : (
+            <>
+              <ComparePage rows={rows} selectedId={selectedId} onOpen={openSite} period={periodLabel(start, days)}
+                           landing={Object.fromEntries(data.sites.map((s) => [s.id, landingFor(s.id)]))} missionDays={missionDays}
+                           onMissionDays={setMissionDays} current={start}
+                           onOpenAt={(id, t) => { openSite(id); landOn(t); }}
+                           battery={batteryById} craft={POWER_PRESETS.find((p) => JSON.stringify(p.cfg) === JSON.stringify(power))?.label.toLowerCase() ?? "custom craft"} />
+              {timebar}
+            </>
+          )}
         </main>
       )}
       {tab === "missions" && data.missions && (
         <main className="missions">
           <MissionsPage data={data.missions} selectedId={missionId} onSelect={setMissionId}
-                        onAnalyse={analyseMission} onGlobe={showMissionOnGlobe} />
+                        onAnalyse={analyseMission} onGlobe={showMissionOnGlobe}
+                        onCompare={(m) => { const sc = missionScenario(m); if (sc) pin(sc); }}
+                        compared={(m) => { const sc = missionScenario(m); return !!sc && scenarios.some((x) => scenarioKey(x) === scenarioKey(sc)); }}
+                        compareCount={scenarios.length} onOpenCompare={() => openCompare("scenarios")} />
         </main>
       )}
       {tab === "method" && <MethodPage />}

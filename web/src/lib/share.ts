@@ -2,6 +2,7 @@
 // place or point, dates, moment, craft, layers, rover route.
 // Defaults are omitted to keep links short. Anything that fails to parse is ignored.
 import { POWER_PRESETS, type PowerConfig } from "./power";
+import { decodeScenarios, encodeScenarios, type Scenario } from "./scenarios";
 
 export type ShareTab = "explore" | "compare" | "missions" | "method";
 export type ShareLayer = "sun" | "earth" | "psr";
@@ -26,11 +27,13 @@ export interface ShareState {
     speed: number;
     example: boolean;
   } | null;
+  scenarios: Scenario[]; // place + date comparison; written to the address only on COMPARE
 }
 
 export const SHARE_DEFAULTS: ShareState = {
   tab: "explore", stage: "globe", site: null, point: null, start: Date.UTC(2027, 0, 1), days: 365, at: null,
   power: POWER_PRESETS[0].cfg, layers: [], mission: null, missionDays: 29.53, route: null,
+  scenarios: [],
 };
 
 const TABS: ShareTab[] = ["explore", "compare", "missions", "method"];
@@ -80,8 +83,10 @@ export function encodeShare(s: ShareState): string {
   if (s.layers.length) q.push(["layers", s.layers.join(",")]);
   if (s.mission) q.push(["mission", s.mission]);
   if (Math.abs(s.missionDays - d.missionDays) > 1e-6) q.push(["mdays", r(s.missionDays, 2)]);
-  // comma, semicolon and colon read better than %2C/%3B/%3A and are allowed in the fragment
-  return q.map(([k, v]) => `${k}=${encodeURIComponent(v).replace(/%2C/g, ",").replace(/%3B/g, ";").replace(/%3A/g, ":")}`).join("&");
+  if (s.tab === "compare" && s.scenarios.length) q.push(["sc", encodeScenarios(s.scenarios)]);
+  // comma, semicolon, colon and @ read better than %2C/%3B/%3A/%40 and are allowed in the fragment
+  return q.map(([k, v]) => `${k}=${encodeURIComponent(v).replace(/%2C/g, ",").replace(/%3B/g, ";").replace(/%3A/g, ":")
+    .replace(/%40/g, "@")}`).join("&");
 }
 
 const latOk = (la: number) => Number.isFinite(la) && la >= -90 && la <= 0; // routes: southern hemisphere only
@@ -133,5 +138,10 @@ export function decodeShare(hash: string): Partial<ShareState> {
   if (mission && /^[a-z0-9-]{1,64}$/.test(mission)) out.mission = mission;
   const md = num(p.get("mdays"));
   if (md >= 1 && md <= 400) out.missionDays = md;
+  const sc = p.get("sc");
+  if (sc) {
+    const list = decodeScenarios(sc);
+    if (list.length) out.scenarios = list;
+  }
   return out;
 }

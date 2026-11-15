@@ -29,6 +29,9 @@ export function MethodPage() {
               where it is at each moment. Driving draws the operating load, in shadow from the battery; at 30% charge the
               rover parks to recharge and moves on at 80%, or, if it is steered from Earth, it also waits for Earth to rise.
               A year of departure dates shows when the traverse gets through and when the battery empties on the way.</li>
+            <li><b>Scenarios</b>: each pinned place and date range is run through exactly the same horizon, sky and
+              power model as EXPLORE, with the craft set in POWER CHECK, and laid out by days since its own start, so a
+              January and a July landing, or two different missions, line up side by side.</li>
             <li><b>Best landing dates</b>: for every day of the year, the same power model is run as if the craft landed
               that day with a full battery; a day is good if the charge never drops below 30% through the chosen
               mission length, tight if it survives with less, and red if the battery empties.</li>
