@@ -3,6 +3,7 @@ import { lazy, Suspense, useDeferredValue, useEffect, useMemo, useRef, useState 
 import { Boot, Header, MobileNav, TimeBar, type Tab } from "./components/Chrome";
 import { ComparePage, type CompareRow } from "./components/ComparePage";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { GoTo } from "./components/GoTo";
 import { Head, Panel } from "./components/hud";
 import { MethodPage } from "./components/MethodPage";
 import { MissionsPage } from "./components/MissionsPage";
@@ -83,12 +84,22 @@ const KIND: Record<string, [string, string]> = {
 };
 
 interface Picked {
-  x: number;
+  x: number; // polar map; NaN in the northern hemisphere
   y: number;
   lat: number;
   lon: number;
+  zone: "polar" | "global"; // polar model (60°S to the pole) or the global LOLA map
   status: "loading" | "ok" | "outside";
   point?: PointHorizon;
+}
+
+const pointKey = (p: { lat: number; lon: number }) => `${p.lat.toFixed(5)},${p.lon.toFixed(5)}`;
+
+/** Great-circle distance, m. */
+function greatCircleM(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const r = Math.PI / 180;
+  const h = Math.sin(((lat2 - lat1) * r) / 2) ** 2 + Math.cos(lat1 * r) * Math.cos(lat2 * r) * Math.sin(((lon2 - lon1) * r) / 2) ** 2;
+  return 2 * 1_737_400 * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
 function unit(v: Vec3): Vec3 {
@@ -285,7 +296,7 @@ export default function App() {
     if (!data || !view || view.what === "route") return null;
     if (view.what === "point" && picked?.point) {
       const p = picked.point;
-      return { key: `pt:${Math.round(picked.x)},${Math.round(picked.y)}`, horizon: p.horizon,
+      return { key: `pt:${pointKey(picked)}`, horizon: p.horizon,
                obs: { lat: picked.lat, lon: picked.lon, elevM: p.groundZ + p.heightM } };
     }
     return selected ? { key: selected.id, obs: siteObserver(selected), horizon: data.horizons.get(selected.id)! } : null;
@@ -422,38 +433,48 @@ export default function App() {
     setTab("explore");
     setStage((s) => (s === "view" || s === "above" ? s : "map"));
   };
-  const pickXY = (x: number, y: number) => {
+  // any point: south of 60° the polar model (5–120 m), the rest of the Moon the global LOLA map (474 m).
+  // Polar points open on the map, the rest on the globe turned towards them (unless clicked on it).
+  const pickPoint = (lat: number, lon: number, from: "map" | "globe" = lat <= -60 ? "map" : "globe", turn = from === "globe") => {
     if (!data) return;
-    const [lat, lon] = xyToLatLon(x, y);
-    const base = { x, y, lat, lon };
+    lon = ((lon % 360) + 360) % 360;
+    if (turn) setGlobeFocus({ lat, lon, key: Date.now() });
+    const zone = lat <= -60 ? "polar" as const : "global" as const;
+    const [x, y] = lat < 0 ? latLonToXY(lat, lon) : [NaN, NaN];
+    const base = { x, y, lat, lon, zone };
     setTab("explore");
-    setStage("map");
+    setStage(from);
     setPlaying(false);
     setRoute(null);
-    if (lat > -60 || !data.anyPoint) {
+    const source = zone === "polar" ? data.anyPoint && ((): Promise<PointHorizon | null> => data.anyPoint!.horizon(x, y))
+      : data.globalPoint && ((): Promise<PointHorizon | null> => data.globalPoint!.horizon(lat, lon));
+    if (!source) {
       setPicked({ ...base, status: "outside" });
       return;
     }
     setPicked({ ...base, status: "loading" });
-    data.anyPoint.horizon(x, y).then(
-      (point) => setPicked((cur) => (cur && cur.x === x && cur.y === y
-        ? { ...base, status: point ? "ok" : "outside", point: point ?? undefined } : cur)),
-      () => setPicked((cur) => (cur && cur.x === x && cur.y === y ? { ...base, status: "outside" } : cur)),
+    const same = (cur: Picked | null) => !!cur && cur.lat === lat && cur.lon === lon;
+    source().then(
+      (point) => setPicked((cur) => (same(cur) ? { ...base, status: point ? "ok" : "outside", point: point ?? undefined } : cur)),
+      () => setPicked((cur) => (same(cur) ? { ...base, status: "outside" } : cur)),
     );
   };
-  const pickLatLon = (lat: number, lon: number) => {
-    const [x, y] = latLonToXY(lat, lon);
-    pickXY(x, y);
+  const pickXY = (x: number, y: number) => {
+    const [lat, lon] = xyToLatLon(x, y);
+    pickPoint(lat, lon, "map");
   };
-  // mission -> landing site analysis: catalog site or any point, period = mission dates
+  // mission -> landing site analysis: catalog site or any point, period = mission dates, cursor at touchdown
   const analyseMission = (m: Mission) => {
-    if (m.window && data) {
+    if (!data) return;
+    if (m.window) {
       const t0 = Math.max(Date.parse(m.window[0] + "T00:00:00Z"), data.ephem.start);
       setStart(t0);
       setDays(Math.max(1, (Date.parse(m.window[1] + "T00:00:00Z") - t0) / DAY_MS));
     }
+    const landed = m.landing ? Date.parse(m.landing) : NaN;
+    pendingAt.current = m.window && Number.isFinite(landed) ? { t: landed, what: m.site ? "site" : "point" } : null;
     if (m.site) openSite(m.site);
-    else if (m.where.x !== undefined && m.where.y !== undefined) pickXY(m.where.x, m.where.y);
+    else if (m.where.lat !== undefined && m.where.lon !== undefined) pickPoint(m.where.lat, m.where.lon);
   };
   // route: a whole year is too long for a rover, show ~six weeks
   const fitPeriod = () => { if (days > 90) setDays(30); };
@@ -541,8 +562,7 @@ export default function App() {
       setRouteFit(Date.now());
       what = "route";
     } else if (s.point) {
-      const [x, y] = latLonToXY(s.point[0], s.point[1]);
-      pickXY(x, y);
+      pickPoint(s.point[0], s.point[1]);
       what = "point";
     } else {
       if (s.site && data.sites.some((x) => x.id === s.site)) setSelectedId(s.site);
@@ -550,7 +570,8 @@ export default function App() {
       setRoute(null);
     }
     setTab(s.tab);
-    setStage(s.stage === "view" || s.stage === "above" ? s.stage : s.route || s.point ? "map" : s.stage);
+    setStage(s.stage === "view" || s.stage === "above" ? s.stage
+      : s.route || (s.point && s.point[0] <= -60) ? "map" : s.point ? "globe" : s.stage);
     pendingAt.current = s.at === null ? null : { t: s.at, what };
   };
   const applyRef = useRef(applyShare);
@@ -569,7 +590,13 @@ export default function App() {
   if (!data) return <Boot done={loaded} error={error} />;
   const missionsList = data.missions?.missions ?? NO_MISSIONS;
 
-  const nearest = picked ? [...data.sites].map((s) => ({ s, d: Math.hypot(s.x - picked.x, s.y - picked.y) })).sort((a, b) => a.d - b.d) : [];
+  const nearest = picked?.zone === "polar" ? [...data.sites].map((s) => ({ s, d: Math.hypot(s.x - picked.x, s.y - picked.y) })).sort((a, b) => a.d - b.d) : [];
+  // away from the pole there are no catalog sites, so show landing sites nearby
+  const nearLandings = picked?.zone === "global" ? missionsList
+    .filter((x) => x.where.lat !== undefined && x.where.lon !== undefined && x.where.precision !== "region")
+    .map((x) => ({ m: x, d: greatCircleM(picked.lat, picked.lon, x.where.lat!, x.where.lon!) }))
+    .sort((a, b) => a.d - b.d) : [];
+  const atLanding = nearLandings[0] && nearLandings[0].d < 1000 ? nearLandings[0].m : null;
   const m = view?.analysis.metrics;
 
   // landing on day t: period = the mission, to see right away how it goes
@@ -612,7 +639,23 @@ export default function App() {
                     onRestore={restoreRoute} />
     );
   } else if (view && m) {
-    if (view.what === "point" && picked?.point) {
+    if (view.what === "point" && picked?.point && picked.zone === "global") {
+      const p = picked.point;
+      left = (
+        <SiteCard title={atLanding ? atLanding.name : "Selected point"} kind="Selected point" kindColor={T.text}
+                  coords={`${fmtLat(picked.lat)} ${fmtLon(picked.lon)} · ${Math.round(p.groundZ)} m`}
+                  notice={`Computed for this exact spot from the global LOLA map: terrain within ${Math.round(p.nearRadiusM / 1000)} km ` +
+                    `at ${p.nearDem.replace("LOLA ", "")}, distant mountains to 300 km at ${(p.farSpacingM / 1000).toFixed(1)} km. ` +
+                    "Craters and ridges smaller than about a kilometre are not resolved, so sunrise and sunset can shift by an hour or two."}
+                  metrics={m} periodDays={days} listTitle="NEAREST LANDINGS"
+                  list={nearLandings.filter((r) => r.m !== atLanding).slice(0, 4).map(({ m: x, d }) => ({
+                    id: x.id, name: x.name, pct: NaN, extra: `${Math.round(d / 1000).toLocaleString("en-US")} km`, on: false,
+                  }))}
+                  power={powerCard} landing={landingCard}
+                  onSelect={(id) => { const x = missionsList.find((q) => q.id === id); if (x) analyseMission(x); }}
+                  onCompare={() => setTab("compare")} compareCount={data.sites.length} />
+      );
+    } else if (view.what === "point" && picked?.point) {
       const p = picked.point;
       const list: ListRow[] = nearest.slice(0, 4).map(({ s, d }) => ({
         id: s.id, name: s.name, pct: sunPctById[s.id] ?? 0, extra: `${(d / 1000).toFixed(1)} km`, on: false,
@@ -651,7 +694,7 @@ export default function App() {
   const card = picked && picked.status !== "ok" && (
     <div className="stage-card">
       <Panel>
-        <Head label={picked.status === "loading" ? "TRACING THE HORIZON" : "OUTSIDE COVERAGE"} />
+        <Head label={picked.status === "loading" ? "TRACING THE HORIZON" : "NO TERRAIN DATA"} />
         {picked.status === "loading" ? (
           <>
             <h3>{fmtLat(picked.lat)} {fmtLon(picked.lon)}</h3>
@@ -659,9 +702,9 @@ export default function App() {
           </>
         ) : (
           <>
-            <h3>This spot is outside our terrain model</h3>
+            <h3>Terrain for this spot did not load</h3>
             <p className="mono">{fmtLat(picked.lat)} {fmtLon(picked.lon)}</p>
-            <p>The model covers the south polar region from 60°S to the pole. Pick a point closer to the pole, or open a catalog site.</p>
+            <p>The terrain tiles around this point are missing or could not be fetched. Try again, pick another point, or open a catalog site.</p>
             <div className="btn-row">
               <button className="btn primary" onClick={() => { setPicked(null); setStage("map"); }}>Back to the pole</button>
               <button className="btn" onClick={() => { setPicked(null); setTab("compare"); }}>Browse sites</button>
@@ -684,7 +727,7 @@ export default function App() {
     : view.what === "route" && trav && roverPt
       ? { kind: "route", name: "Rover", x: roverPt.x, y: roverPt.y, groundZ: trav.rh.ground[trav.run.idx[iNow]],
           route: mapRouteBase?.path ?? trav.rh.pts, waypoints: mapRouteBase?.anchors ?? route?.way }
-    : view.what === "point" && picked?.point
+    : view.what === "point" && picked?.point && picked.zone === "polar"
       ? { kind: "point", name: "Selected point", x: picked.x, y: picked.y, groundZ: picked.point.groundZ }
     : view.what === "site" && selected
       ? { kind: "site", name: selected.name, x: selected.x, y: selected.y, groundZ: selected.ground_z }
@@ -725,8 +768,9 @@ export default function App() {
             )}>
               <Suspense fallback={null}>
                 <Globe data={data} selectedId={hideSel ? null : selectedId} sunPctById={sunPctById}
-                       sunDir={dirs.sun} earthDir={dirs.earth} onPick={pickLatLon} onZoomPole={() => setStage("map")}
-                  missions={missionsList} missionId={missionId} focus={globeFocus} />
+                       sunDir={dirs.sun} earthDir={dirs.earth} onPick={(lat, lon) => pickPoint(lat, lon, undefined, false)} onZoomPole={() => setStage("map")}
+                  missions={missionsList} missionId={missionId} focus={globeFocus}
+                  picked={picked?.zone === "global" ? { lat: picked.lat, lon: picked.lon, ok: picked.status === "ok", name: atLanding?.name ?? null } : null} />
               </Suspense>
             </ErrorBoundary>
           </div>
@@ -737,8 +781,8 @@ export default function App() {
                           line: `${mSel.sunMeanPct.toFixed(0)}% sun · ${mSel.earthPct.toFixed(0)}% Earth` } : null}
                         overlays={overlays} onToggleOverlay={(k) => setOverlays((o) => ({ ...o, [k]: !o[k] }))}
                         onSelect={openSite} onPick={(x, y) => { if (!route) pickXY(x, y); }} onGlobe={() => setStage("globe")}
-                        picked={picked && { x: picked.x, y: picked.y }}
-                        pickedTag={picked ? { title: "SELECTED POINT", line: `${fmtLat(picked.lat)} ${fmtLon(picked.lon)}` } : null}
+                        picked={picked?.zone === "polar" ? { x: picked.x, y: picked.y } : null}
+                        pickedTag={picked?.zone === "polar" ? { title: "SELECTED POINT", line: `${fmtLat(picked.lat)} ${fmtLon(picked.lon)}` } : null}
                         pickedLink={picked?.status === "ok" && nearest[0] ? { x: nearest[0].s.x, y: nearest[0].s.y } : null}
                         missions={missionsList} route={mapRoute} onRoute={onRoute} onView3D={route?.drawing || !open3d ? null : () => open3d()} />
             </div>
@@ -779,6 +823,9 @@ export default function App() {
             </div>
           )}
           {card}
+          {(stage === "globe" || stage === "map") && !route?.drawing && (
+            <GoTo key={stage} onGo={(lat, lon) => pickPoint(lat, lon)} style={{ top: stage === "map" ? 60 : 14 }} />
+          )}
         </div>
         {view && horizonNow && <ResultPanel what={view.what} horizon={horizonNow} analysis={view.analysis} cursor={cursor}
                               onCursor={(i) => { setPlaying(false); setCursor(i); }}

@@ -27,7 +27,7 @@ export function Header({ tab, onTab, clock, onShare }: {
         <Emblem />
         <div>
           <div className="brand-name">PEAK OF ETERNAL LIGHT</div>
-          <div className="brand-sub">Lunar south pole · landing site browser</div>
+          <div className="brand-sub">Lunar landing site browser · south pole in detail</div>
         </div>
       </div>
       <nav className="nav">
@@ -121,7 +121,7 @@ export function TimeBar(p: TimeProps) {
 }
 
 const STEPS: [LoadStep, string, string][] = [
-  ["ephem", "Sun and Earth positions 2023–2035", "0.4 MB"],
+  ["ephem", "Sun and Earth positions 1969–2035", "2.3 MB"],
   ["horizons", "Terrain horizons of catalog sites", "0.1 MB"],
   ["map", "Map, globe and terrain index", ""],
 ];
@@ -132,7 +132,7 @@ export function Boot({ done, error }: { done: Set<LoadStep>; error: string | nul
       <Panel>
         <Head label={error ? "ERROR" : "STARTING UP"} />
         <h1>{error ? "Could not load lunar data" : "Loading lunar data"}</h1>
-        <p>{error ?? "About 1 MB to start. After that everything is computed in your browser."}</p>
+        <p>{error ?? "About 3 MB to start. After that everything is computed in your browser."}</p>
         {!error && <div className="progress"><i style={{ width: `${(100 * done.size) / STEPS.length}%` }} /></div>}
         <div className="steps">
           {STEPS.map(([k, label, size]) => (

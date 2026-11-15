@@ -32,13 +32,21 @@ export function StatusGlyph({ status, size = 12 }: { status: MissionStatus; size
   );
 }
 
-const inZone = (m: Mission) => m.where.x !== undefined;
+const hasPlace = (m: Mission) => m.where.lat !== undefined && m.where.lon !== undefined;
+const atPole = (m: Mission) => m.where.lat !== undefined && m.where.lat <= -60;
 const yearOf = (m: Mission) => (m.landing ?? m.launch).match(/\d{4}/)?.[0] ?? "TBD";
 const when = (m: Mission) =>
   m.landing ? `landed ${m.landing.slice(0, 10)}` : /^\d{4}-\d\d-\d\d$/.test(m.launch) ? `launched ${m.launch}` : `launch ${m.launch}`;
 
-type Filter = "all" | "flown" | "planned" | "pole";
-const FILTERS: [Filter, string][] = [["all", "All"], ["flown", "Flown"], ["planned", "Planned"], ["pole", "South pole"]];
+type Filter = "all" | "clps" | "flown" | "planned" | "pole";
+const FILTERS: [Filter, string][] = [["all", "All"], ["clps", "CLPS"], ["flown", "Flown"], ["planned", "Planned"], ["pole", "South pole"]];
+const PASS: Record<Filter, (m: Mission) => boolean> = {
+  all: () => true,
+  clps: (m) => m.group === "clps",
+  flown: (m) => m.status !== "planned",
+  planned: (m) => m.status === "planned",
+  pole: atPole,
+};
 
 interface Props {
   data: MissionsFile;
@@ -49,7 +57,7 @@ interface Props {
 }
 
 export function MissionsPage({ data, selectedId, onSelect, onAnalyse, onGlobe }: Props) {
-  const [filter, setFilter] = useState<Filter>("all");
+  const [filter, setFilter] = useState<Filter>("clps");
   const card = useRef<HTMLDivElement>(null);
   // on phones the card is below the list; scroll to it after a pick
   const pick = (id: string) => {
@@ -58,9 +66,7 @@ export function MissionsPage({ data, selectedId, onSelect, onAnalyse, onGlobe }:
       requestAnimationFrame(() => card.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
     }
   };
-  const list = useMemo(() => data.missions.filter((m) =>
-    filter === "all" || (filter === "flown" ? m.status !== "planned" : filter === "planned" ? m.status === "planned" : inZone(m)),
-  ), [data, filter]);
+  const list = useMemo(() => data.missions.filter(PASS[filter]), [data, filter]);
   const years = useMemo(() => {
     const g = new Map<string, Mission[]>();
     for (const m of list) g.set(yearOf(m), [...(g.get(yearOf(m)) ?? []), m]);
@@ -72,7 +78,7 @@ export function MissionsPage({ data, selectedId, onSelect, onAnalyse, onGlobe }:
   return (
     <>
       <Panel className="scroll">
-        <Head num="01" label="LUNAR MISSIONS" right={`NASA Commercial Lunar Payload Services · as of ${data.as_of}`} />
+        <Head num="01" label="LUNAR MISSIONS" right={`NASA CLPS, other landers and Apollo · as of ${data.as_of}`} />
         <div className="chips" role="group" aria-label="Filter missions">
           {FILTERS.map(([k, l]) => (
             <button key={k} className={`chip ${k === filter ? "on" : ""}`} onClick={() => setFilter(k)}>{l}</button>
@@ -92,8 +98,7 @@ export function MissionsPage({ data, selectedId, onSelect, onAnalyse, onGlobe }:
                     </span>
                     <span className="mrow-side">
                       <span>{when(x)}</span>
-                      {inZone(x) && <em>in analysis zone</em>}
-                      {x.group === "other" && <em>not CLPS</em>}
+                      {x.group === "other" && <em>{x.provider === "NASA" ? "Apollo" : "not CLPS"}</em>}
                     </span>
                   </button>
                 ))}
@@ -115,7 +120,7 @@ export function MissionsPage({ data, selectedId, onSelect, onAnalyse, onGlobe }:
           <dt>Launch</dt><dd>{m.launch}</dd>
           {m.landing && <><dt>Landing</dt><dd>{m.landing.replace("T", " ").replace("Z", " UTC")}</dd></>}
           {m.end && <><dt>Surface ops end</dt><dd>{m.end.slice(0, 10)}</dd></>}
-          <dt>{m.where.precision === "landed" ? "Landing site" : "Target"}</dt>
+          <dt>{m.where.precision === "landed" ? "Landing site" : m.where.precision === "impact" ? "Impact site" : "Target"}</dt>
           <dd>
             {m.where.name}
             {m.where.lat !== undefined && m.where.lon !== undefined && (
@@ -128,15 +133,16 @@ export function MissionsPage({ data, selectedId, onSelect, onAnalyse, onGlobe }:
         </dl>
 
         <div className="btn-row">
-          {inZone(m) && (
+          {hasPlace(m) && (
             <button className="btn primary" onClick={() => onAnalyse(m)}>
-              {m.window ? "Analyse the site over the mission dates" : m.where.precision === "landed" ? "Analyse the landing site" : "Analyse the region centre"}
+              {m.window ? "Analyse the site over the mission dates" : m.where.precision === "landed" ? "Analyse the landing site"
+                : m.where.precision === "impact" ? "Analyse the impact site" : "Analyse the region centre"}
             </button>
           )}
           {m.where.lat !== undefined && <button className="btn" onClick={() => onGlobe(m)}>Show on the globe</button>}
         </div>
-        {!inZone(m) && m.where.lat !== undefined && (
-          <p className="mnote">Outside the terrain model (60°S to the pole): shown on the globe only.</p>
+        {hasPlace(m) && !atPole(m) && (
+          <p className="mnote">Away from the pole the horizon comes from the global LOLA map (474 m), so local sunrise and sunset can be off by an hour or two.</p>
         )}
 
         {m.payloads.length > 0 && (

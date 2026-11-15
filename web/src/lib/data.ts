@@ -1,4 +1,5 @@
 import { AnyPoint, httpLoader } from "./anypoint";
+import { GlobalPoint } from "./globalpoint";
 import { VisMap } from "./vismap";
 import { Ephem, Horizon, type EphemMeta } from "./astro";
 
@@ -65,6 +66,7 @@ export interface AppData {
   closeups: Record<string, ImageLayer>;
   globe: GlobeMeta | null;
   anyPoint: AnyPoint | null; // horizon of any point (near terrain + far-mountain grid)
+  globalPoint: GlobalPoint | null; // the same for the rest of the Moon, from the global LOLA map
   clones: ClonesIndex | null; // which sites have horizon variants from terrain error
   missions: MissionsFile | null;
 }
@@ -83,7 +85,7 @@ export interface Mission {
   status: MissionStatus;
   outcome: string;
   site?: string; // catalog site id
-  where: { name: string; precision: "landed" | "region" | "none"; lat?: number; lon?: number; x?: number; y?: number;
+  where: { name: string; precision: "landed" | "impact" | "region" | "none"; lat?: number; lon?: number; x?: number; y?: number;
            radius_km?: number };
   window: [string, string] | null; // analysis period
   payloads: string[];
@@ -139,14 +141,15 @@ export async function loadAppData(onStep: (s: LoadStep) => void = () => {}): Pro
     json<Record<string, ImageLayer>>("closeups/closeups.json").catch(() => ({})),
     json<GlobeMeta>("globe/globe.json").catch(() => null),
     AnyPoint.load(httpLoader(BASE)).catch(() => null),
+    GlobalPoint.load(httpLoader(BASE)).catch(() => null),
     json<ClonesIndex>("horizons/clones/index.json").catch(() => null),
     json<MissionsFile>("missions.json").catch(() => null),
   ]).then((r) => {
     onStep("map");
     return r;
   });
-  const [ephem, { sites, horizons }, [map, overlays, closeups, globe, anyPoint, clones, missions]] = await Promise.all([ephemP, sitesP, mapP]);
-  return { ephem, sites, horizons, map, overlays, closeups, globe, anyPoint, clones, missions };
+  const [ephem, { sites, horizons }, [map, overlays, closeups, globe, anyPoint, globalPoint, clones, missions]] = await Promise.all([ephemP, sitesP, mapP]);
+  return { ephem, sites, horizons, map, overlays, closeups, globe, anyPoint, globalPoint, clones, missions };
 }
 
 const cloneCache = new Map<string, Promise<Horizon[] | null>>();

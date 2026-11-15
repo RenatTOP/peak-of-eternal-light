@@ -85,7 +85,7 @@ export function SiteCard(p: Props) {
           <button key={r.id} className={r.on ? "on" : ""} onClick={() => p.onSelect(r.id)}>
             <span>{r.name}</span>
             {r.extra ? <span className="num" style={{ color: T.muted }}>{r.extra}</span> : <Bar pct={r.pct} color={T.sun} width={90} />}
-            <span className="num" style={{ color: r.extra ? T.sun : undefined }}>{r.pct.toFixed(0)}%</span>
+            {Number.isFinite(r.pct) && <span className="num" style={{ color: r.extra ? T.sun : undefined }}>{r.pct.toFixed(0)}%</span>}
           </button>
         ))}
       </div>

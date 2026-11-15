@@ -84,7 +84,8 @@ export function encodeShare(s: ShareState): string {
   return q.map(([k, v]) => `${k}=${encodeURIComponent(v).replace(/%2C/g, ",").replace(/%3B/g, ";").replace(/%3A/g, ":")}`).join("&");
 }
 
-const latOk = (la: number) => Number.isFinite(la) && la >= -90 && la <= 0;
+const latOk = (la: number) => Number.isFinite(la) && la >= -90 && la <= 0; // routes: southern hemisphere only
+const anyLatOk = (la: number) => Number.isFinite(la) && Math.abs(la) <= 90; // points: anywhere on the Moon
 const lonOk = (lo: number) => Number.isFinite(lo) && lo >= -360 && lo <= 360;
 
 /** Parses the address; returns only what is present and makes sense. */
@@ -100,7 +101,7 @@ export function decodeShare(hash: string): Partial<ShareState> {
   const site = p.get("site");
   if (site && /^[a-z0-9-]{1,64}$/.test(site)) out.site = site;
   const pt = p.get("pt")?.split(",").map(Number);
-  if (pt?.length === 2 && latOk(pt[0]) && lonOk(pt[1])) out.point = [pt[0], pt[1]];
+  if (pt?.length === 2 && anyLatOk(pt[0]) && lonOk(pt[1])) out.point = [pt[0], pt[1]];
   const way = p.get("route")?.split(";").map((v) => v.split(",").map(Number));
   if (way && way.length >= 2 && way.length <= 500 && way.every((v) => v.length === 2 && latOk(v[0]) && lonOk(v[1]))) {
     const mode = p.get("drive") as ShareDrive | null;

@@ -90,3 +90,18 @@ describe.each((reference as { site: string }[]).map((r) => [r.site, r as any] as
     expect(Math.abs(m.gapMaxH - ref.metrics.gap_max_h)).toBeLessThanOrEqual(2);
   });
 });
+
+// Historical check: Sun elevation at touchdown per the Apollo Lunar Surface Journal
+// (Fjeld and Scotti's calculations; their methods differ by under 0.5°).
+describe("Sun elevation at the Apollo landings", () => {
+  for (const [name, lat, lon, t, alt] of [
+    ["Apollo 11", 0.67408, 23.47297, "1969-07-20T20:17:39Z", 10.65],
+    ["Apollo 12", -3.01239, 336.57843, "1969-11-19T06:54:36Z", 5.19],
+  ] as const) {
+    it(name, () => {
+      const t0 = Date.parse(t);
+      const s = computeSeries(ephem, { lat, lon, elevM: 0 }, Horizon.flat(), t0, t0 + 3_600_000, 3_600_000);
+      expect(Math.abs(s.sunAlt[0] - alt)).toBeLessThan(0.1);
+    });
+  }
+});

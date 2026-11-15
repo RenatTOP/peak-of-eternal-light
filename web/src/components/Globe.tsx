@@ -5,6 +5,7 @@ import * as THREE from "three";
 
 import { DATA_URL, type AppData, type GlobeCap, type Mission } from "../lib/data";
 import { T, sunAlpha } from "../lib/theme";
+import { fmtLat, fmtLon } from "../lib/format";
 import { Brackets } from "./hud";
 
 type Vec3 = [number, number, number];
@@ -20,6 +21,7 @@ interface Props {
   missions: Mission[];
   missionId: string;
   focus: { lat: number; lon: number; key: number } | null; // turn the globe to this point
+  picked: { lat: number; lon: number; ok: boolean; name: string | null } | null; // any point outside the polar zone (name = mission, if a landing site)
 }
 
 // MOON_ME (x to Earth, z north) -> three.js coordinates (y up) and back
@@ -152,6 +154,7 @@ interface Overlay {
   zone: { x: number; y: number } | null; // where to label the analysis zone edge
   zoneLat: number;
   mission: { x: number; y: number; name: string; status: Mission["status"] } | null; // chosen mission, if visible
+  picked: { x: number; y: number } | null; // chosen point, if on the visible side
 }
 
 // Circle on the surface: planned landing region (exact spot unpublished)
@@ -179,7 +182,7 @@ function lookAt(lat: number, lon: number): THREE.Quaternion {
   return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, c).transpose());
 }
 
-export function Globe({ data, selectedId, sunPctById, sunDir, earthDir, onPick, onZoomPole, missions, missionId, focus }: Props) {
+export function Globe({ data, selectedId, sunPctById, sunDir, earthDir, onPick, onZoomPole, missions, missionId, focus, picked }: Props) {
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const gl = useRef<{
@@ -199,6 +202,8 @@ export function Globe({ data, selectedId, sunPctById, sunDir, earthDir, onPick, 
   handlers.current = { onPick, onZoomPole };
   const missionRef = useRef({ missions, missionId });
   missionRef.current = { missions, missionId };
+  const pickedRef = useRef(picked);
+  pickedRef.current = picked;
   const [ov, setOv] = useState<Overlay | null>(null);
   const [ready, setReady] = useState(false);
   const zoomed = useRef(false); // the user zoomed; don't refit to size
@@ -297,7 +302,7 @@ export function Globe({ data, selectedId, sunPctById, sunDir, earthDir, onPick, 
       const { lat, lon, precision, radius_km } = ms.where;
       if (lat === undefined || lon === undefined) continue;
       let o: THREE.Object3D;
-      if (precision === "landed") {
+      if (precision === "landed" || precision === "impact") {
         o = new THREE.Mesh(new THREE.OctahedronGeometry(1), new THREE.MeshBasicMaterial({
           color: ms.status === "failure" ? T.empty : T.text }));
         o.position.copy(toThree(unit(lat, lon)).multiplyScalar(1.0015));
@@ -362,8 +367,17 @@ export function Globe({ data, selectedId, sunPctById, sunDir, earthDir, onPick, 
           mission = { x: (q.x + 1) * w / 2, y: (1 - q.y) * h / 2, name: sel.name, status: sel.status };
         }
       }
+      let pickedAt: Overlay["picked"] = null;
+      const pk = pickedRef.current;
+      if (pk) {
+        const p = toThree(unit(pk.lat, pk.lon)).applyQuaternion(moon.quaternion);
+        if (p.z > 1.02 / d) {
+          const q = p.clone().project(camera);
+          pickedAt = { x: (q.x + 1) * w / 2, y: (1 - q.y) * h / 2 };
+        }
+      }
       setOv({
-        w, h, cx: w / 2, cy: h / 2, r,
+        w, h, cx: w / 2, cy: h / 2, r, picked: pickedAt,
         sunA: ang(dirs.current.sun), earthA: ang(dirs.current.earth),
         pole: { x: (pp.x + 1) * w / 2, y: (1 - pp.y) * h / 2, visible: pole.z > 1 / d },
         zone: zoneAt, zoneLat: zone.outerLat, mission,
@@ -424,6 +438,11 @@ export function Globe({ data, selectedId, sunPctById, sunDir, earthDir, onPick, 
     }
     g.render();
   }, [missionId]);
+
+  // --- chosen point: mark in the overlay
+  useEffect(() => {
+    gl.current?.render();
+  }, [picked?.lat, picked?.lon, picked?.ok]);
 
   // --- turn the globe to a point (mission view): smoothly, in ~0.9 s
   useEffect(() => {
@@ -539,15 +558,16 @@ export function Globe({ data, selectedId, sunPctById, sunDir, earthDir, onPick, 
     <div ref={wrap} className="stage-fill"
          style={{ position: "absolute", inset: 0, opacity: ready ? 1 : 0, transition: "opacity 0.5s ease" }}>
       <canvas ref={canvas} className="globe-canvas" aria-label="The Moon seen from below its south pole. Drag to turn, scroll to zoom, click a spot south of 60°S to analyse it." />
-      {ov && <GlobeOverlay ov={ov} data={data} selectedId={selectedId} onZoomPole={() => handlers.current.onZoomPole()} />}
+      {ov && <GlobeOverlay ov={ov} data={data} selectedId={selectedId} picked={picked} onZoomPole={() => handlers.current.onZoomPole()} />}
     </div>
   );
 }
 
-function GlobeOverlay({ ov, data, selectedId, onZoomPole }: {
+function GlobeOverlay({ ov, data, selectedId, picked, onZoomPole }: {
   ov: Overlay;
   data: AppData;
   selectedId: string | null;
+  picked: Props["picked"];
   onZoomPole: () => void;
 }) {
   const { w, h, cx, cy, r } = ov;
@@ -625,6 +645,21 @@ function GlobeOverlay({ ov, data, selectedId, onZoomPole }: {
                                           transform: Math.cos(ov.earthA) < 0 ? "translateX(-100%)" : undefined }}>
         <b style={{ color: T.earth }}>EARTH</b><span>near side</span>
       </div>
+      {ov.picked && (
+        <svg className="globe-overlay" width={w} height={h} viewBox={`0 0 ${w} ${h}`}>
+          <g stroke={T.text} fill="none" strokeWidth="1.3">
+            <circle cx={ov.picked.x} cy={ov.picked.y} r="7" strokeDasharray={picked?.ok ? undefined : "3 2.5"} />
+            <path d={`M${ov.picked.x - 13} ${ov.picked.y} h5 M${ov.picked.x + 8} ${ov.picked.y} h5
+                      M${ov.picked.x} ${ov.picked.y - 13} v5 M${ov.picked.x} ${ov.picked.y + 8} v5`} />
+          </g>
+        </svg>
+      )}
+      {ov.picked && picked && !(ov.mission && Math.hypot(ov.mission.x - ov.picked.x, ov.mission.y - ov.picked.y) < 24) && (
+        <div className="mission-tag" style={{ left: ov.picked.x + 6, top: ov.picked.y }}>
+          <b>{picked.name ?? "SELECTED POINT"}</b>
+          <span>{fmtLat(picked.lat)} {fmtLon(picked.lon)}</span>
+        </div>
+      )}
       {ov.mission && (
         <div className="mission-tag" style={{ left: ov.mission.x, top: ov.mission.y }}>
           <b>{ov.mission.name}</b>
@@ -633,7 +668,7 @@ function GlobeOverlay({ ov, data, selectedId, onZoomPole }: {
       )}
       {ov.zone && (
         <div className="zone-label" style={{ left: ov.zone.x, top: ov.zone.y }}>
-          <b>ANALYSIS ZONE</b><span>any spot south of {Math.round(-ov.zoneLat)}°S</span>
+          <b>DETAILED ZONE</b><span>5–120 m terrain south of {Math.round(-ov.zoneLat)}°S</span>
         </div>
       )}
       {lens && (
@@ -661,7 +696,7 @@ function GlobeOverlay({ ov, data, selectedId, onZoomPole }: {
           <span className="inset-cap"><b>SOUTH POLE</b><span>{ls >= 140 ? "Open map ›" : "›"}</span></span>
         </button>
       )}
-      <div className="stage-hint">Drag to turn the Moon · scroll to zoom · click any spot south of 60°S</div>
+      <div className="stage-hint">Drag to turn the Moon · scroll to zoom · click any spot to analyse it</div>
     </>
   );
 }

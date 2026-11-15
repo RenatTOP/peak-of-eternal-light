@@ -49,6 +49,12 @@ describe("share link", () => {
     expect(q).toEqual({ layers: ["sun"] });
   });
 
+  it("keeps a point anywhere on the Moon, not only in the south", () => {
+    const h = encodeShare({ ...SHARE_DEFAULTS, point: [18.567, 61.817] });
+    expect(decodeShare(h).point).toEqual([18.567, 61.817]);
+    expect(decodeShare("#pt=91,10").point).toBeUndefined();
+  });
+
   it("drops out-of-range pins but keeps the route", () => {
     const q = decodeShare("#route=-89,10;-88,20&pins=0,5&drive=nope&speed=1");
     expect(q.route).toEqual({ way: [[-89, 10], [-88, 20]], pins: null, mode: "battery", speed: 250, example: false });

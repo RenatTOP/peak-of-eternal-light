@@ -41,18 +41,23 @@ export function MethodPage() {
             Catalog sites use horizons precomputed from 5 m terrain. For any other point south of 60°S the near
             terrain (33–47 km) is traced live from LOLA tiles, 80 m poleward of 80°S and 120 m beyond, and distant
             mountains come from a precomputed grid (2 km / 5 km spacing), corrected for the observer’s height.
+            Anywhere else on the Moon the horizon is traced live along 720 great circles from the global LOLA map:
+            474 m terrain to 100 km and 1.9 km terrain from 100 to 300 km, where the Moon’s curvature already hides
+            everything but large mountains.
           </p>
         </Panel>
         <Panel>
           <Head num="02" label="DATA" />
           <ul>
-            <li><b>Ephemerides</b>: NASA/JPL NAIF SPICE, DE440 planetary ephemeris and lunar orientation (MOON_ME), mid-2023 to 2035.</li>
-            <li><b>Terrain</b>: LRO LOLA polar DEMs, 5 m at candidate sites, 20–240 m regional (Barker et al.).</li>
+            <li><b>Ephemerides</b>: NASA/JPL NAIF SPICE, DE440 planetary ephemeris and lunar orientation (MOON_ME), mid-1969 to 2035.</li>
+            <li><b>Terrain</b>: LRO LOLA polar DEMs, 5 m at candidate sites, 20–240 m regional (Barker et al.);
+              the rest of the Moon from the LOLA global map at 64 pixels per degree (PDS GDR, 474 m).</li>
             <li><b>Near-site detail</b>: shape-from-shading 5 m terrain and LROC NAC mosaics of Artemis III regions (Bertone et al.).</li>
             <li><b>Reference maps</b> (also used to route the sunnier path): average illumination, Earth visibility and permanent shadow to 65°S (Mazarico et al., Barker et al.).
               NASA publishes none beyond 65°S, so the 60–66°S band on the map is computed here with the same horizon model, over the same 18.6 years.</li>
             <li><b>Missions</b>: NASA CLPS deliveries as of September 2026 (NASA Science CLPS pages and per-mission
-              sources listed on each card). Planned landing regions are drawn as circles because exact sites are not published.</li>
+              sources listed on each card). Planned landing regions are drawn as circles because exact sites are not published.
+              For context the catalog also holds Apollo 11–17, other landers since 2013, and the impact sites of failed landings.</li>
             <li><b>Globe</b>: NASA SVS CGI Moon Kit, LROC WAC colour and LOLA topography. The poles are drawn as
               polar stereographic caps, the south one shaded from the 240 m LOLA polar DEM.</li>
           </ul>
@@ -78,6 +83,13 @@ export function MethodPage() {
           <p>
             Known events are reproduced: Chandrayaan-3 sunset on 4 September 2023 and sunrise on
             19–20 September, and IM-1 Odysseus sunset on 2 March 2024.
+          </p>
+          <p>
+            <b>Away from the pole</b>: the Sun’s elevation at the Apollo 11 and 12 touchdowns comes out at 10.70° and 5.14°,
+            against 10.65° and 5.19° in the Apollo Lunar Surface Journal. With the coarser 474 m terrain, sunset at the
+            Blue Ghost 1 site falls at 20:21 UTC on 16 March 2025; Firefly reported about five hours of night operations
+            before the lander went dark at 23:15 UTC, which puts the local sunset near 18:15. Expect timing errors of an
+            hour or two here, not minutes.
           </p>
           <p>
             <b>Any point on the map</b>: against full 5 m horizons, the live browser horizon differs by a median
