@@ -332,7 +332,7 @@ export default function App() {
     return () => clearInterval(id);
   }, [playing, n]);
 
-  const clock = view ? view.analysis.series.t[Math.min(cursor, n - 1)] : null;
+  const clock = view && n ? view.analysis.series.t[Math.min(cursor, n - 1)] : null;
   const dirs = useMemo(() => {
     if (!data) return { sun: [1, 0, 0] as Vec3, earth: [1, 0, 0] as Vec3 };
     const t = clock ?? start;

@@ -14,10 +14,12 @@ export function Brackets({ size = 10 }: { size?: number }) {
 }
 
 export function Panel({ className = "", children }: { className?: string; children: ReactNode }) {
+  // scrolling panel: the inner block scrolls, the brackets stay on the frame
+  const scroll = className.split(" ").includes("scroll");
   return (
     <section className={`panel ${className}`}>
       <Brackets />
-      {children}
+      {scroll ? <div className="panel-body">{children}</div> : children}
     </section>
   );
 }
