@@ -1,6 +1,6 @@
 """Site data as a GitHub release, to work from any PC without 80 GB of raw NASA data.
 
-Git holds only code. Generated data (web/public/data, ~0.5 GB) and a few costly
+Git holds only code. Generated data (web/public/data, ~0.9 GB) and a few costly
 intermediate files (data/derived: the 60-66° belt, terrain clones) are packed into one
 archive and published as a `data-YYYY-MM-DD` release. Needs `gh` signed in to GitHub.
 
@@ -8,6 +8,7 @@ archive and published as a `data-YYYY-MM-DD` release. Needs `gh` signed in to Gi
     python -m pipeline.data_release fetch --tag data-2026-09-28
     python -m pipeline.data_release pack             # pack current data into out/
     python -m pipeline.data_release upload           # pack and publish a new release
+    python -m pipeline.data_release --repo OWNER/NAME upload --reuse   # same archive to another repository
 
 Raw NASA data to rerun the pipeline: python -m pipeline.fetch_data (public, ~82 GB).
 """
@@ -33,7 +34,12 @@ PREFIX = "data-"
 ASSET = "peak-data.tar.gz"
 
 
+REPO: str | None = None  # --repo OWNER/NAME; default: the repository of this clone
+
+
 def _gh(*args: str, capture: bool = True) -> str:
+    if REPO and args[0] == "release":
+        args = (*args, "--repo", REPO)
     try:
         r = subprocess.run(["gh", *args], cwd=ROOT, check=True, text=True, encoding="utf-8",
                            capture_output=capture)
@@ -74,8 +80,21 @@ def pack(out_dir: Path) -> Path:
     return archive
 
 
-def upload(tag: str | None) -> None:
-    archive = pack(ROOT / "out" / "release")
+def pushed_head() -> str:
+    """HEAD commit, which must already be in the target repository: the release tag goes there."""
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True, check=True).stdout.strip()
+    repo = REPO or _gh("repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner").strip()
+    r = subprocess.run(["gh", "api", f"repos/{repo}/commits/{head}", "--silent"], cwd=ROOT, capture_output=True)
+    if r.returncode:
+        sys.exit(f"HEAD {head[:7]} is not in {repo} yet: push it first, so the data release is tagged on this code.")
+    return head
+
+
+def upload(tag: str | None, reuse: bool = False) -> None:
+    head = pushed_head()
+    archive = ROOT / "out" / "release" / ASSET
+    if not (reuse and archive.exists()):
+        archive = pack(ROOT / "out" / "release")
     meta = json.loads((archive.parent / "peak-data.json").read_text(encoding="utf-8"))
     tag = tag or PREFIX + dt.date.today().isoformat()
     notes = (f"Generated site data and pipeline intermediates: {meta['files']} files, "
@@ -83,7 +102,7 @@ def upload(tag: str | None) -> None:
              "Install: `python -m pipeline.data_release fetch`")
     print(f"publishing release {tag} (the upload may take a few minutes)…", flush=True)
     _gh("release", "create", tag, str(archive), str(archive.parent / "peak-data.json"),
-        "--title", f"Data {tag[len(PREFIX):]}", "--notes", notes, "--latest=false", capture=False)
+        "--target", head, "--title", f"Data {tag[len(PREFIX):]}", "--notes", notes, "--latest=false", capture=False)
     print(f"done: {tag}")
 
 
@@ -143,11 +162,15 @@ def main(argv: list[str] | None = None) -> int:
     up.add_argument("--tag")
     fe = sub.add_parser("fetch", help="download and unpack a data release")
     fe.add_argument("--tag")
+    p.add_argument("--repo", help="OWNER/NAME of the repository with the releases (default: this clone's)")
+    up.add_argument("--reuse", action="store_true", help="publish the archive already in out/release/")
     a = p.parse_args(argv)
+    global REPO
+    REPO = a.repo
     if a.cmd == "pack":
         pack(ROOT / "out" / "release")
     elif a.cmd == "upload":
-        upload(a.tag)
+        upload(a.tag, a.reuse)
     else:
         fetch(a.tag)
     return 0
