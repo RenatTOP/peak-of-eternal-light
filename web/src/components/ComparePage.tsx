@@ -117,7 +117,7 @@ export function ComparePage({ rows, selectedId, onOpen, period, battery, craft, 
                 <span className="cell r">{m.sunEarthPct.toFixed(0)}%</span>
                 {strip === "sun" ? <span><Strip a={r.analysis} /></span> : (
                   <span className="cstrip">
-                    <DateStrip days={landing[r.site.id]?.map((d) => ({ t: d.t, v: VERDICT_MARK[d.v] })) ?? null} current={current}
+                    <DateStrip days={landing[r.site.id]?.map((d) => ({ t: d.t, v: VERDICT_MARK[d.v], f: d.life })) ?? null} current={current}
                                onPick={(t) => onOpenAt(r.site.id, t)} height={16} months={false}
                                title={`Click a day to land at ${r.site.name} then`} />
                   </span>

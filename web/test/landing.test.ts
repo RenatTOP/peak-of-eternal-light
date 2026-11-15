@@ -19,7 +19,8 @@ describe("landing dates", () => {
     const days = landingScan(e, obs, new Horizon(new Float32Array(720).fill(-5)), craft, e.start, e.start + 20 * 86_400_000, 14);
     expect(days.length).toBe(21);
     expect(days.every((d) => d.v === "good" && d.minSoc === 1)).toBe(true);
-    expect(landingSummary(days)).toEqual({ good: 21, total: 21, best: [days[0].t, days[20].t] });
+    expect(landingSummary(days)).toMatchObject({ good: 21, total: 21, best: [days[0].t, days[20].t] });
+    expect(days.every((d) => d.life === 1)).toBe(true);
   });
 
   it("behind a terrain wall the battery runs out", () => {
@@ -27,6 +28,8 @@ describe("landing dates", () => {
     // 3000 Wh at 60 W survival is 50 h; the mission is 14 days
     const days = landingScan(e, obs, new Horizon(new Float32Array(720).fill(45)), craft, e.start, e.start + 5 * 86_400_000, 14);
     expect(days.every((d) => d.v === "fails" && d.minSoc === 0)).toBe(true);
+    // 3000 / 60 = 50 h of 336: the share of the mission the craft lives
+    expect(days[0].life).toBeCloseTo(50 / 336, 2);
     expect(landingSummary(days).best).toBeNull();
   });
 
@@ -38,8 +41,9 @@ describe("landing dates", () => {
   });
 
   it("summary finds the longest run of good days", () => {
-    const d = (v: LandingDay["v"], t: number): LandingDay => ({ t, v, minSoc: 0.5 });
+    const d = (v: LandingDay["v"], t: number): LandingDay => ({ t, v, minSoc: 0.5, life: v === "fails" ? 0.3 : 1 });
     const s = landingSummary([d("good", 0), d("fails", 1), d("good", 2), d("good", 3), d("tight", 4), d("good", 5)]);
-    expect(s).toEqual({ good: 4, total: 6, best: [2, 3] });
+    expect(s).toMatchObject({ good: 4, total: 6, best: [2, 3] });
+    expect(s.longest?.t).toBe(0);
   });
 });
