@@ -28,3 +28,6 @@ __pycache__/
 .vscode/
 .idea/
 Thumbs.db
+
+# cloudflare
+web/.wrangler/

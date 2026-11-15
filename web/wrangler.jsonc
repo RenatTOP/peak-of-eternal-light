@@ -1,0 +1,7 @@
+// Cloudflare Pages: a static site with no server code (all computation runs in the browser).
+// Deploy: npm run deploy (builds and uploads dist/).
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "peak-of-eternal-light",
+  "pages_build_output_dir": "./dist"
+}
