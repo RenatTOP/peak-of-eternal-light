@@ -50,7 +50,7 @@ function Strip({ a, width = 128, height = 16 }: { a: Analysis; width?: number; h
   );
 }
 
-export function ComparePage({ rows, selectedId, onOpen, period, battery, craft, landing, missionDays, onMissionDays, year, current, onOpenAt }: {
+export function ComparePage({ rows, selectedId, onOpen, period, battery, craft, landing, missionDays, onMissionDays, current, onOpenAt }: {
   rows: CompareRow[];
   selectedId: string | null;
   onOpen: (id: string) => void;
@@ -60,7 +60,6 @@ export function ComparePage({ rows, selectedId, onOpen, period, battery, craft, 
   landing: Record<string, LandingDay[] | null>; // best landing dates over the year
   missionDays: number;
   onMissionDays: (d: number) => void;
-  year: number;
   current: number;
   onOpenAt: (id: string, t: number) => void; // open the place with a landing on day t
 }) {
@@ -97,7 +96,7 @@ export function ComparePage({ rows, selectedId, onOpen, period, battery, craft, 
             <span />{th(null, "SITE")}{th("sun", "SOLAR ENERGY")}{th("night", "LONGEST NIGHT", true)}{th("battery", "BATTERY", true)}
             {th("earth", "LINK TO EARTH")}{th("gap", "LONGEST GAP", true)}{th("both", "SUN+EARTH", true)}<button className="on" onClick={() => setStrip((s) => (s === "sun" ? "landing" : "sun"))}
                     title="Switch between sunlight by date and good landing dates">
-              {strip === "sun" ? "SUNLIGHT BY DATE ⇄" : `LANDING DATES ${year} ⇄`}
+              {strip === "sun" ? "SUNLIGHT BY DATE ⇄" : "LANDING DATES ⇄"}
             </button>
           </div>
           {sorted.map((r, n) => {

@@ -29,6 +29,13 @@ export function MethodPage() {
               where it is at each moment. Driving draws the operating load, in shadow from the battery; at 30% charge the
               rover parks to recharge and moves on at 80%, or, if it is steered from Earth, it also waits for Earth to rise.
               A year of departure dates shows when the traverse gets through and when the battery empties on the way.</li>
+            <li><b>Best landing dates</b>: for every day of the year, the same power model is run as if the craft landed
+              that day with a full battery; a day is good if the charge never drops below 30% through the chosen
+              mission length, tight if it survives with less, and red if the battery empties.</li>
+            <li><b>Sunnier path</b>: each leg between your waypoints is rerouted as the cheapest path on a 100–600 m grid,
+              where a step costs its length times (1 + 12 × darkness²), darkness being one minus NASA’s 18.6-year mean
+              sunlight (plus an Earth term when the rover is steered from Earth), and steps steeper than 15° are not allowed.
+              The traverse is then simulated again for your dates, so you see what the detour actually buys.</li>
           </ul>
           <p>
             Catalog sites use horizons precomputed from 5 m terrain. For any other point south of 60°S the near
@@ -39,11 +46,13 @@ export function MethodPage() {
         <Panel>
           <Head num="02" label="DATA" />
           <ul>
-            <li><b>Ephemerides</b>: NASA/JPL NAIF SPICE, DE440 planetary ephemeris and lunar orientation (MOON_ME), 2024–2035.</li>
+            <li><b>Ephemerides</b>: NASA/JPL NAIF SPICE, DE440 planetary ephemeris and lunar orientation (MOON_ME), mid-2023 to 2035.</li>
             <li><b>Terrain</b>: LRO LOLA polar DEMs, 5 m at candidate sites, 20–240 m regional (Barker et al.).</li>
             <li><b>Near-site detail</b>: shape-from-shading 5 m terrain and LROC NAC mosaics of Artemis III regions (Bertone et al.).</li>
-            <li><b>Reference maps</b>: average illumination, Earth visibility and permanent shadow to 65°S (Mazarico et al., Barker et al.).
+            <li><b>Reference maps</b> (also used to route the sunnier path): average illumination, Earth visibility and permanent shadow to 65°S (Mazarico et al., Barker et al.).
               NASA publishes none beyond 65°S, so the 60–66°S band on the map is computed here with the same horizon model, over the same 18.6 years.</li>
+            <li><b>Missions</b>: NASA CLPS deliveries as of September 2026 (NASA Science CLPS pages and per-mission
+              sources listed on each card). Planned landing regions are drawn as circles because exact sites are not published.</li>
             <li><b>Globe</b>: NASA SVS CGI Moon Kit, LROC WAC colour and LOLA topography. The poles are drawn as
               polar stereographic caps, the south one shaded from the 240 m LOLA polar DEM.</li>
           </ul>

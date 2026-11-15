@@ -13,6 +13,7 @@ import { passState, TraverseCard, type RouteStats, type TraverseState } from "./
 import { PATH_DEFAULTS, sunnierPath } from "./lib/pathfind";
 import { LandingCard } from "./components/LandingCard";
 import { landingScan, type LandingDay } from "./lib/landing";
+import { decodeShare, encodeShare, SHARE_DEFAULTS, type ShareState } from "./lib/share";
 import type { PointHorizon } from "./lib/anypoint";
 import { analyze, computeSeries, computeTrack, latLonToXY, xyToLatLon, type Analysis, type Horizon, type Observer } from "./lib/astro";
 import { loadAppData, loadClones, loadVisMap, type AppData, type LoadStep, type Mission, type SiteInfo } from "./lib/data";
@@ -58,6 +59,7 @@ interface RouteDraft {
   prev: XY[] | null; // route before editing, for Cancel
   example: boolean;
   original: { way: XY[]; stats: RouteStats } | null; // before the sunnier path
+  pins: XY[] | null; // user waypoints, if the link brought an already rerouted route
 }
 
 interface Trace {
@@ -225,6 +227,15 @@ export default function App() {
   }, [data, trav, picked, selected, byId, start, days]);
 
   useEffect(() => setCursor(0), [selectedId, picked, start, days, trav]);
+  const pendingAt = useRef<{ t: number; what: "site" | "point" | "route" } | null>(null);
+  useEffect(() => {
+    const p = pendingAt.current;
+    if (!p || !view || view.what !== p.what) return;
+    const s = view.analysis.series;
+    pendingAt.current = null;
+    if (p.t < s.t[0] || p.t > s.t[s.t.length - 1]) return;
+    setCursor(Math.round((p.t - s.t[0]) / s.stepMs));
+  }, [view]);
 
   // --- horizon variants from terrain error: only for sites NASA provides clones for
   useEffect(() => {
@@ -328,12 +339,74 @@ export default function App() {
     return { sun: unit(data.ephem.position(0, t)), earth: unit(data.ephem.position(1, t)) };
   }, [data, clock, start]);
 
+  // link: on first data load and on hashchange (another link pasted into the same tab)
+  const shareReady = useRef(false);
+  useEffect(() => {
+    if (!data || shareReady.current) return;
+    // without a link keep the saved craft and the default view
+    if (location.hash.length > 1) applyRef.current(decodeShare(location.hash));
+    shareReady.current = true;
+  }, [data]);
+  useEffect(() => {
+    if (!data) return;
+    const onHash = () => applyRef.current(decodeShare(location.hash));
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, [data]);
+
+  // --- current state -> page address (slightly delayed so history isn't hit every frame)
+  const shareState = (): ShareState => {
+    const anchors = route?.original?.way ?? route?.pins ?? null;
+    const pins = route && anchors ? anchors.map((a) => route.way.indexOf(a)) : null;
+    const pending = pendingAt.current;
+    return {
+      tab, stage, site: picked || route ? null : selectedId, point: picked ? [picked.lat, picked.lon] : null,
+      start, days, at: pending ? pending.t : view && cursor > 0 ? clock : null, power,
+      layers: (["sun", "earth", "psr"] as const).filter((k) => overlays[k]),
+      mission: tab === "missions" ? missionId : null, missionDays,
+      route: route && !route.drawing && route.way.length >= 2 ? {
+        way: route.way.map(([x, y]) => xyToLatLon(x, y)),
+        pins: pins && pins.every((i) => i >= 0) ? pins : null,
+        mode: travCfg.mode, speed: travCfg.speedMh, example: route.example,
+      } : null,
+    };
+  };
+  const hash = shareReady.current ? encodeShare(shareState()) : null;
+  const shareUrl = () => `${location.origin}${location.pathname}${location.search}${hash ? `#${hash}` : ""}`;
+  useEffect(() => {
+    if (hash === null) return;
+    const id = setTimeout(() => {
+      if (location.hash.replace(/^#/, "") !== hash) history.replaceState(history.state, "", shareUrl());
+    }, 300);
+    return () => clearTimeout(id);
+  }, [hash]); // eslint-disable-line react-hooks/exhaustive-deps
+  const share = async (): Promise<boolean> => {
+    const url = shareUrl();
+    history.replaceState(history.state, "", url);
+    try {
+      await navigator.clipboard.writeText(url);
+      return true;
+    } catch {
+      // clipboard unavailable (embedded page, old browser): fall back to selection
+      const ta = document.createElement("textarea");
+      ta.value = url;
+      ta.setAttribute("readonly", "");
+      ta.style.cssText = "position:fixed;opacity:0;left:-9999px";
+      document.body.appendChild(ta);
+      ta.select();
+      let ok = false;
+      try { ok = document.execCommand("copy"); } catch { /* the address bar remains */ }
+      ta.remove();
+      return ok;
+    }
+  };
+
   // map path: waypoints and how the rover drove each leg
   const mapRouteBase = useMemo((): MapRoute | null => {
     if (!route) return null;
     const path = trav ? passState(trav.rh, trav.run).map((state, k) => ({ x: trav.rh.pts[k].x, y: trav.rh.pts[k].y, state })) : undefined;
     return { way: route.way, drawing: route.drawing, lengthKm: routeLength(route.way) / 1000, path,
-             anchors: route.original && !route.drawing ? route.original.way : undefined };
+             anchors: route.drawing ? undefined : route.original?.way ?? route.pins ?? undefined };
   }, [route, trav]);
 
   // --- actions
@@ -391,7 +464,7 @@ export default function App() {
     setStage("map");
     // default craft is a lander; routes use the rover unless the user changed the settings
     if (JSON.stringify(power) === JSON.stringify(POWER_PRESETS[0].cfg)) setPower(POWER_PRESETS.find((p) => p.id === "rover")!.cfg);
-    setRoute({ way, drawing: way.length < 2, prev: null, example, original: null });
+    setRoute({ way, drawing: way.length < 2, prev: null, example, original: null, pins: null });
     if (way.length >= 2 && !example) fitPeriod();
   };
   const onRoute = (a: RouteAction) => {
@@ -409,7 +482,7 @@ export default function App() {
       // the example stays an example only while unchanged
       const same = !!route.prev && route.prev.length === route.way.length && route.prev.every((p, i) => p === route.way[i]);
       setRoute({ ...route, way: same ? route.prev! : route.way, drawing: false, prev: null, example: route.example && same,
-                 original: same ? route.original : null });
+                 original: same ? route.original : null, pins: same ? route.pins : null });
       fitPeriod();
     }
   };
@@ -439,9 +512,44 @@ export default function App() {
                                   { ...PATH_DEFAULTS, earthWeight: travCfg.mode === "batteryEarth" ? 6 : 0 });
     setSuggest("idle");
     setRoute((r) => r && r.way === route.way
-      ? { ...r, way: res.way, drawing: false, prev: null, original: { way: r.way, stats } } : r);
+      ? { ...r, way: res.way, drawing: false, prev: null, original: { way: r.way, stats }, pins: null } : r);
   };
   const restoreRoute = () => setRoute((r) => r?.original ? { ...r, way: r.original.way, original: null } : r);
+  // --- link: apply state from the address (on open and when it is edited by hand)
+  const applyShare = (q: Partial<ShareState>) => {
+    if (!data) return;
+    const s = { ...SHARE_DEFAULTS, ...q };
+    setPlaying(false);
+    setStart(Math.min(Math.max(s.start, data.ephem.start), data.ephem.end - 14 * DAY_MS));
+    setDays(s.days);
+    setPower(s.power);
+    setOverlays({ sun: s.layers.includes("sun"), earth: s.layers.includes("earth"), psr: s.layers.includes("psr") });
+    setMissionDays(s.missionDays);
+    if (s.mission && data.missions?.missions.some((m) => m.id === s.mission)) setMissionId(s.mission);
+    let what: "site" | "point" | "route" = "site";
+    if (s.route) {
+      const way = s.route.way.map(([la, lo]) => latLonToXY(la, lo));
+      setPicked(null);
+      setTravCfg({ speedMh: s.route.speed, mode: s.route.mode });
+      setRoute({ way, drawing: false, prev: null, example: s.route.example, original: null,
+                 pins: s.route.pins ? s.route.pins.map((i) => way[i]) : null });
+      setRouteFit(Date.now());
+      what = "route";
+    } else if (s.point) {
+      const [x, y] = latLonToXY(s.point[0], s.point[1]);
+      pickXY(x, y);
+      what = "point";
+    } else {
+      if (s.site && data.sites.some((x) => x.id === s.site)) setSelectedId(s.site);
+      setPicked(null);
+      setRoute(null);
+    }
+    setTab(s.tab);
+    setStage(s.route || s.point ? "map" : s.stage);
+    pendingAt.current = s.at === null ? null : { t: s.at, what };
+  };
+  const applyRef = useRef(applyShare);
+  applyRef.current = applyShare;
   const showMissionOnGlobe = (m: Mission) => {
     if (m.where.lat === undefined || m.where.lon === undefined) return;
     setGlobeFocus({ lat: m.where.lat, lon: m.where.lon, key: Date.now() });
@@ -483,7 +591,8 @@ export default function App() {
     : { status: "tracing", done: trace?.way === route.way ? trace.done : 0, total: trace?.way === route.way ? trace.total : 0 };
   if (route && travState) {
     left = (
-      <TraverseCard state={travState} example={route.example} waypoints={route.original && !route.drawing ? route.original.way.length : route.way.length} lengthM={routeLength(route.way)}
+      <TraverseCard state={travState} example={route.example}
+                    waypoints={route.drawing ? route.way.length : (route.original?.way ?? route.pins ?? route.way).length} lengthM={routeLength(route.way)}
                     startLatLon={route.way.length ? xyToLatLon(route.way[0][0], route.way[0][1]) : null}
                     cfg={travCfg} onCfg={setTravCfg} periodDays={days} periodStart={start} power={trav ? powerCard : null}
                     onEdit={() => setRoute({ ...route, drawing: true, prev: route.way })} onClear={() => setRoute(null)}
@@ -560,9 +669,10 @@ export default function App() {
   const horizonNow = view ? view.horizon ?? (trav ? trav.rh.horizons[trav.run.idx[iNow]] : null) : null;
   const mapRoute = route && mapRouteBase ? { ...mapRouteBase, fitKey: routeFit, rover: roverPt && { x: roverPt.x, y: roverPt.y } } : null;
   const hideSel = !!picked || !!route;
+
   return (
     <div className="app">
-      <Header tab={tab} onTab={setTab} clock={clock} />
+      <Header tab={tab} onTab={setTab} clock={clock} onShare={share} />
       {/* EXPLORE stays mounted on other pages: the globe (WebGL, ~8 MB of textures)
           and the map stay ready instead of being rebuilt each time */}
       <main className="explore" hidden={tab !== "explore"}>
@@ -598,7 +708,7 @@ export default function App() {
         <main className="compare">
           <ComparePage rows={rows} selectedId={selectedId} onOpen={openSite} period={periodLabel(start, days)}
                        landing={Object.fromEntries(data.sites.map((s) => [s.id, landingFor(s.id)]))} missionDays={missionDays}
-                       onMissionDays={setMissionDays} year={scanYear} current={start}
+                       onMissionDays={setMissionDays} current={start}
                        onOpenAt={(id, t) => { openSite(id); landOn(t); }}
                        battery={batteryById} craft={POWER_PRESETS.find((p) => JSON.stringify(p.cfg) === JSON.stringify(power))?.label.toLowerCase() ?? "custom craft"} />
           {timebar}
