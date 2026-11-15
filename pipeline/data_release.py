@@ -116,7 +116,9 @@ def fetch(tag: str | None) -> None:
             sys.exit("Archive checksum mismatch, try again.")
         stage = tmp / "x"
         with tarfile.open(tmp / ASSET, "r:gz") as tar:
-            tar.extractall(stage, members=list(_safe_members(tar)))
+            # filter="data" (Python 3.12+) is the standard extraction guard; we check paths ourselves too
+            kw = {"filter": "data"} if hasattr(tarfile, "data_filter") else {}
+            tar.extractall(stage, members=list(_safe_members(tar)), **kw)
         # site data is replaced whole (no stale tiles), intermediates are added
         new_web = stage / "web" / "public" / "data"
         if WEB_DATA.exists():
