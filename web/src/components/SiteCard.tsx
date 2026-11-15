@@ -31,6 +31,7 @@ interface Props {
   compareCount: number;
   spread?: Spread | null; // spread from terrain error (only sites with clones)
   power?: ReactNode;
+  landing?: ReactNode; // best landing dates
 }
 
 const days = (h: number) => (h >= 48 ? `${(h / 24).toFixed(1)} d` : `${Math.round(h)} h`);
@@ -77,6 +78,7 @@ export function SiteCard(p: Props) {
       )}
       {p.note && <p className="note">{p.note}</p>}
       {p.power}
+      {p.landing}
       <div style={{ marginTop: 10 }}><Head label={p.listTitle} /></div>
       <div className="rank">
         {p.list.map((r) => (

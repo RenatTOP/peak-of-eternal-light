@@ -11,6 +11,8 @@ import { ResultPanel } from "./components/ResultPanel";
 import { SiteCard, type ListRow } from "./components/SiteCard";
 import { passState, TraverseCard, type RouteStats, type TraverseState } from "./components/TraverseCard";
 import { PATH_DEFAULTS, sunnierPath } from "./lib/pathfind";
+import { LandingCard } from "./components/LandingCard";
+import { landingScan, type LandingDay } from "./lib/landing";
 import type { PointHorizon } from "./lib/anypoint";
 import { analyze, computeSeries, computeTrack, latLonToXY, xyToLatLon, type Analysis, type Horizon, type Observer } from "./lib/astro";
 import { loadAppData, loadClones, loadVisMap, type AppData, type LoadStep, type Mission, type SiteInfo } from "./lib/data";
@@ -124,6 +126,7 @@ export default function App() {
   const traceRef = useRef(trace);
   traceRef.current = trace;
   const [travCfg, setTravCfg] = useState<TraverseConfig>({ speedMh: 250, mode: "battery" });
+  const [missionDays, setMissionDays] = useState(29.53); // mission length for best landing dates
 
   useEffect(() => {
     try { localStorage.setItem(POWER_KEY, JSON.stringify(power)); } catch { /* not critical */ }
@@ -255,6 +258,46 @@ export default function App() {
     const end = Math.min(start + days * DAY_MS, data.ephem.end);
     return terrainSpread(computeTrack(data.ephem, siteObserver(selected), start, end, autoStepMs(days)), clones.h, powerLazy);
   }, [data, cloneFor, selected, clones, start, days, powerLazy]);
+
+  // --- best landing dates: for the current place, on COMPARE for all; in the background, one at a time
+  const scanYear = new Date(start).getUTCFullYear();
+  const scanTag = `${scanYear}|${missionDays}|${JSON.stringify(powerLazy)}`;
+  const [scans, setScans] = useState<Map<string, LandingDay[]>>(() => new Map());
+  const scansRef = useRef(scans);
+  scansRef.current = scans;
+  const scanSubject = useMemo(() => {
+    if (!data || !view || view.what === "route") return null;
+    if (view.what === "point" && picked?.point) {
+      const p = picked.point;
+      return { key: `pt:${Math.round(picked.x)},${Math.round(picked.y)}`, horizon: p.horizon,
+               obs: { lat: picked.lat, lon: picked.lon, elevM: p.groundZ + p.heightM } };
+    }
+    return selected ? { key: selected.id, obs: siteObserver(selected), horizon: data.horizons.get(selected.id)! } : null;
+  }, [data, view, picked, selected]);
+  useEffect(() => {
+    if (!data) return;
+    const subjects = [...(scanSubject ? [scanSubject] : []),
+      ...(tab === "compare" ? data.sites.map((s) => ({ key: s.id, obs: siteObserver(s), horizon: data.horizons.get(s.id)! })) : [])];
+    const todo = subjects.filter((s) => !scansRef.current.has(`${s.key}|${scanTag}`));
+    if (!todo.length) return;
+    let alive = true;
+    let k = 0;
+    let id = 0;
+    const step = () => {
+      if (!alive || k >= todo.length) return;
+      const s = todo[k++];
+      const days = landingScan(data.ephem, s.obs, s.horizon, powerLazy, Date.UTC(scanYear, 0, 1), Date.UTC(scanYear, 11, 31), missionDays);
+      setScans((prev) => {
+        const m = new Map(prev.size > 80 ? [] : prev);
+        m.set(`${s.key}|${scanTag}`, days);
+        return m;
+      });
+      id = window.setTimeout(step, 0);
+    };
+    id = window.setTimeout(step, 150);
+    return () => { alive = false; clearTimeout(id); };
+  }, [data, scanSubject, tab, scanTag]); // eslint-disable-line react-hooks/exhaustive-deps
+  const landingFor = (key: string | undefined) => (key ? scans.get(`${key}|${scanTag}`) ?? null : null);
 
   // --- playback: the period runs in about 20 seconds
   const n = view?.analysis.series.t.length ?? 0;
@@ -412,6 +455,17 @@ export default function App() {
   const nearest = picked ? [...data.sites].map((s) => ({ s, d: Math.hypot(s.x - picked.x, s.y - picked.y) })).sort((a, b) => a.d - b.d) : [];
   const m = view?.analysis.metrics;
 
+  // landing on day t: period = the mission, to see right away how it goes
+  const landOn = (t: number) => {
+    setPlaying(false);
+    setStart(t);
+    setDays(missionDays);
+  };
+  const landingCard = scanSubject && (
+    <LandingCard days={landingFor(scanSubject.key)} missionDays={missionDays} onMissionDays={setMissionDays}
+                 current={start} onPick={landOn} />
+  );
+
   const powerCard = powerRes && (
     <PowerCard cfg={power} onCfg={setPower} result={powerRes.result} needWh={powerRes.needWh}
                spread={spread} spreadLoading={!!cloneFor && !spread}
@@ -450,7 +504,7 @@ export default function App() {
                   coords={`${fmtLat(picked.lat)} ${fmtLon(picked.lon)} · ${Math.round(p.groundZ)} m`}
                   notice={`Computed for this exact spot: terrain within ${Math.round(p.nearRadiusM / 1000)} km from ${p.nearDem}, ` +
                     `distant mountains from a ${p.farSpacingM / 1000} km grid. Catalog sites use 5 m terrain, so small ridges and boulders may be missing here.`}
-                  metrics={m} periodDays={days} listTitle="NEAREST SITES" list={list} power={powerCard}
+                  metrics={m} periodDays={days} listTitle="NEAREST SITES" list={list} power={powerCard} landing={landingCard}
                   onSelect={openSite} onCompare={() => setTab("compare")} compareCount={data.sites.length} />
       );
     } else if (selected) {
@@ -463,7 +517,7 @@ export default function App() {
                   coords={`${fmtLat(selected.lat)} ${fmtLon(selected.lon)} · ${Math.round(selected.ground_z)} m`}
                   metrics={m} periodDays={days} listTitle="SITES · SOLAR ENERGY"
                   list={top.map((r) => ({ id: r.site.id, name: r.site.name, pct: r.analysis.metrics.sunMeanPct, on: r.site.id === selected.id }))}
-                  spread={spread} power={powerCard}
+                  spread={spread} power={powerCard} landing={landingCard}
                   onSelect={openSite} onCompare={() => setTab("compare")} compareCount={data.sites.length} />
       );
     }
@@ -543,6 +597,9 @@ export default function App() {
       {tab === "compare" && (
         <main className="compare">
           <ComparePage rows={rows} selectedId={selectedId} onOpen={openSite} period={periodLabel(start, days)}
+                       landing={Object.fromEntries(data.sites.map((s) => [s.id, landingFor(s.id)]))} missionDays={missionDays}
+                       onMissionDays={setMissionDays} year={scanYear} current={start}
+                       onOpenAt={(id, t) => { openSite(id); landOn(t); }}
                        battery={batteryById} craft={POWER_PRESETS.find((p) => JSON.stringify(p.cfg) === JSON.stringify(power))?.label.toLowerCase() ?? "custom craft"} />
           {timebar}
         </main>

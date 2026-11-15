@@ -7,8 +7,11 @@ import { fmtDateTime, fmtDuration, fmtLat, fmtLon } from "../lib/format";
 import { T } from "../lib/theme";
 import { RESERVE, RESUME, type Departure, type RouteHorizons, type TraverseConfig, type TraverseRun } from "../lib/traverse";
 import { Head, Panel } from "./hud";
+import { DateStrip, type DayMark } from "./DateStrip";
 import { MetricGauges } from "./SiteCard";
 import { useCanvas } from "./useCanvas";
+
+const DEP_MARK: Record<Departure, DayMark> = { survives: "good", arrives: "mid", fails: "bad" };
 
 export const STEEP_DEG = 15; // slope beyond which rovers usually don't drive
 
@@ -149,7 +152,8 @@ export function TraverseCard(p: Props) {
           <div style={{ marginTop: 12 }}>
             <Head label="WHEN TO START" right={`each day of ${new Date(p.periodStart).getUTCFullYear()}, ${Math.round(Math.min(p.periodDays, 60))}-day window`} />
           </div>
-          <DepartureStrip days={p.departures} current={p.periodStart} onStart={p.onStart} />
+          <DateStrip days={p.departures && p.departures.map((d) => ({ t: d.t, v: DEP_MARK[d.v] }))} current={p.periodStart}
+                     onPick={p.onStart} title="Click a day to start the traverse then" />
           <div className="trav-legend">
             <span><i style={{ background: T.text }} />arrives, battery lasts the period</span>
             <span><i style={{ background: T.bracket, opacity: 0.55 }} />arrives, battery empties later</span>
@@ -203,65 +207,6 @@ function Compare({ a, b, year, onRestore }: { a: RouteStats; b: RouteStats; year
       <button className="btn" onClick={onRestore}>Back to my route</button>
     </div>
   );
-}
-
-/** Strip of the year's days: arrives / arrives but the battery dies / doesn't arrive. Click starts that day. */
-function DepartureStrip({ days, current, onStart }: { days: { t: number; v: Departure }[] | null; current: number; onStart: (t: number) => void }) {
-  const ref = useRef<HTMLCanvasElement>(null);
-  const size = useCanvas(ref);
-  const pad = { t: 2, b: 14 };
-  const year = new Date(current).getUTCFullYear();
-  const y0 = Date.UTC(year, 0, 1);
-  const yLen = Date.UTC(year + 1, 0, 1) - y0;
-
-  useEffect(() => {
-    const cv = ref.current;
-    if (!cv || !size.w) return;
-    const ctx = cv.getContext("2d")!;
-    const { w, h, dpr } = size;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, w, h);
-    const X = (t: number) => ((t - y0) / yLen) * w;
-    const bh = h - pad.t - pad.b;
-    ctx.fillStyle = "#0a1826";
-    ctx.fillRect(0, pad.t, w, bh);
-    const dw = w / 365;
-    for (const d of days ?? []) {
-      ctx.globalAlpha = d.v === "survives" ? 1 : d.v === "arrives" ? 0.55 : 0.45;
-      ctx.fillStyle = d.v === "survives" ? T.text : d.v === "arrives" ? T.bracket : T.empty;
-      ctx.fillRect(X(d.t), pad.t, Math.max(1, dw - 0.3), bh);
-    }
-    ctx.globalAlpha = 1;
-    // months
-    ctx.font = `9.5px ${T.mono}`;
-    ctx.fillStyle = T.faint;
-    ctx.textAlign = "left";
-    for (let m = 0; m < 12; m++) {
-      const x = X(Date.UTC(year, m, 1));
-      ctx.fillRect(x, pad.t + bh, 1, 3);
-      if (m % 2 === 0) ctx.fillText("JFMAMJJASOND"[m], x + 2, h - 2);
-    }
-    // chosen start
-    const xc = X(current);
-    ctx.strokeStyle = T.sun;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(xc, 0);
-    ctx.lineTo(xc, pad.t + bh + 2);
-    ctx.stroke();
-    if (!days) {
-      ctx.fillStyle = T.muted;
-      ctx.textAlign = "center";
-      ctx.fillText("checking every start date…", w / 2, pad.t + bh / 2 + 3);
-    }
-  }, [size, days, current, year, y0, yLen]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const click = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const r = e.currentTarget.getBoundingClientRect();
-    const t = y0 + ((e.clientX - r.left) / r.width) * yLen;
-    onStart(Math.floor((t - y0) / 86_400_000) * 86_400_000 + y0);
-  };
-  return <canvas ref={ref} className="trav-dates" onClick={click} title="Click a day to start the traverse then" />;
 }
 
 function Arrival({ run, start, periodDays, mode }: { run: TraverseRun; start: number; periodDays: number; mode: TraverseConfig["mode"] }) {

@@ -409,7 +409,15 @@ button.crow.on { background: rgba(255, 181, 71, 0.08); border-left-color: var(--
 .trav-cmp b { font: 500 12.5px var(--mono); text-align: right; }
 .trav-cmp b.muted { color: var(--faint); }
 .trav-cmp i { font-style: normal; color: var(--faint); text-align: center; }
-.trav-dates { display: block; width: 100%; height: 34px; margin-top: 6px; cursor: pointer; }
+.landing { margin-top: 14px; }
+.landing-sum { font-size: 12px; color: var(--muted); line-height: 1.45; margin: 6px 0 0; }
+.landing-sum b { color: var(--text); font-weight: 500; }
+.cstrip { display: block; width: 128px; }
+.cstrip .date-strip { margin-top: 0; }
+.clanding { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px;
+            margin: 8px 0 4px; font-size: 12px; color: var(--muted); }
+.clanding .seg { min-width: 260px; }
+.date-strip { display: block; width: 100%; margin-top: 6px; cursor: pointer; }
 .trav-profile { display: block; width: 100%; height: 160px; margin-top: 12px; cursor: crosshair; }
 .trav-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; font-size: 11px; color: var(--faint); }
 .trav-legend span { display: inline-flex; align-items: center; gap: 5px; }

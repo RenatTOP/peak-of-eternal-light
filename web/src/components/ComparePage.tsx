@@ -7,6 +7,9 @@ import { fmtDuration } from "../lib/format";
 import { T } from "../lib/theme";
 import { Bar, Head, Panel } from "./hud";
 import { fmtWh } from "./PowerCard";
+import type { LandingDay } from "../lib/landing";
+import { DateStrip } from "./DateStrip";
+import { MISSION_LENGTHS, missionLabel, VERDICT_MARK } from "./LandingCard";
 
 export interface CompareRow {
   site: SiteInfo;
@@ -47,15 +50,22 @@ function Strip({ a, width = 128, height = 16 }: { a: Analysis; width?: number; h
   );
 }
 
-export function ComparePage({ rows, selectedId, onOpen, period, battery, craft }: {
+export function ComparePage({ rows, selectedId, onOpen, period, battery, craft, landing, missionDays, onMissionDays, year, current, onOpenAt }: {
   rows: CompareRow[];
   selectedId: string | null;
   onOpen: (id: string) => void;
   period: string;
   battery: Record<string, number>; // battery needed for the POWER CHECK craft, Wh
   craft: string; // craft label for the header
+  landing: Record<string, LandingDay[] | null>; // best landing dates over the year
+  missionDays: number;
+  onMissionDays: (d: number) => void;
+  year: number;
+  current: number;
+  onOpenAt: (id: string, t: number) => void; // open the place with a landing on day t
 }) {
   const [key, setKey] = useState<Key>("sun");
+  const [strip, setStrip] = useState<"sun" | "landing">("landing");
   const sorted = useMemo(() => [...rows].sort((a, b) => value(b, key, battery) - value(a, key, battery)),
                          [rows, key, battery]);
   const th = (k: Key | null, label: string, right = false) => (
@@ -72,10 +82,23 @@ export function ComparePage({ rows, selectedId, onOpen, period, battery, craft }
     <>
       <Panel>
         <Head num="01" label="COMPARE SITES" right={`${period} · battery for: ${craft} · click a row to open the site`} />
+        {strip === "landing" && (
+          <div className="clanding">
+            <span>Landing dates: can the {craft} survive a {missionLabel(missionDays)} mission if it lands that day?</span>
+            <div className="seg" role="group" aria-label="Mission length">
+              {MISSION_LENGTHS.map(([d, l]) => (
+                <button key={l} className={Math.abs(d - missionDays) < 0.01 ? "on" : ""} onClick={() => onMissionDays(d)}>{l}</button>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="ctable">
           <div className="crow head-row">
             <span />{th(null, "SITE")}{th("sun", "SOLAR ENERGY")}{th("night", "LONGEST NIGHT", true)}{th("battery", "BATTERY", true)}
-            {th("earth", "LINK TO EARTH")}{th("gap", "LONGEST GAP", true)}{th("both", "SUN+EARTH", true)}{th(null, "SUNLIGHT BY DATE")}
+            {th("earth", "LINK TO EARTH")}{th("gap", "LONGEST GAP", true)}{th("both", "SUN+EARTH", true)}<button className="on" onClick={() => setStrip((s) => (s === "sun" ? "landing" : "sun"))}
+                    title="Switch between sunlight by date and good landing dates">
+              {strip === "sun" ? "SUNLIGHT BY DATE ⇄" : `LANDING DATES ${year} ⇄`}
+            </button>
           </div>
           {sorted.map((r, n) => {
             const m = r.analysis.metrics;
@@ -93,7 +116,13 @@ export function ComparePage({ rows, selectedId, onOpen, period, battery, craft }
                 <span className="cell"><Bar pct={m.earthPct} color={T.earth} />{m.earthPct.toFixed(0)}%</span>
                 <span className="cell r">{m.earthPct <= 0 ? "no link" : m.gapMaxH <= 0 ? "none" : fmtDuration(m.gapMaxH)}</span>
                 <span className="cell r">{m.sunEarthPct.toFixed(0)}%</span>
-                <span><Strip a={r.analysis} /></span>
+                {strip === "sun" ? <span><Strip a={r.analysis} /></span> : (
+                  <span className="cstrip">
+                    <DateStrip days={landing[r.site.id]?.map((d) => ({ t: d.t, v: VERDICT_MARK[d.v] })) ?? null} current={current}
+                               onPick={(t) => onOpenAt(r.site.id, t)} height={16} months={false}
+                               title={`Click a day to land at ${r.site.name} then`} />
+                  </span>
+                )}
               </button>
             );
           })}
