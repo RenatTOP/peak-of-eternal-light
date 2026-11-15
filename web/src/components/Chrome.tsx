@@ -38,6 +38,7 @@ export function Header({ tab, onTab, clock, onShare }: {
         ))}
       </nav>
       <button className={`share ${shared}`} onClick={() => onShare().then((ok) => setShared(ok ? "ok" : "fail"))}
+              aria-label={shared === "ok" ? "Link copied" : "Copy a link to this view"} aria-live="polite"
               title="Copy a link to exactly this view: site or route, dates, moment, craft and layers">
         <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
           {shared === "ok"

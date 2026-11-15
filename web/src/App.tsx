@@ -2,6 +2,7 @@ import { lazy, Suspense, useDeferredValue, useEffect, useMemo, useRef, useState 
 
 import { Boot, Header, MobileNav, TimeBar, type Tab } from "./components/Chrome";
 import { ComparePage, type CompareRow } from "./components/ComparePage";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Head, Panel } from "./components/hud";
 import { MethodPage } from "./components/MethodPage";
 import { MissionsPage } from "./components/MissionsPage";
@@ -679,11 +680,24 @@ export default function App() {
         {left}
         <div className="stage">
           <div className="stage-layer" hidden={stage !== "globe"}>
-            <Suspense fallback={null}>
-              <Globe data={data} selectedId={hideSel ? null : selectedId} sunPctById={sunPctById}
-                     sunDir={dirs.sun} earthDir={dirs.earth} onPick={pickLatLon} onZoomPole={() => setStage("map")}
-                missions={missionsList} missionId={missionId} focus={globeFocus} />
-            </Suspense>
+            <ErrorBoundary fallback={() => (
+              <div className="stage-card">
+                <Panel>
+                  <Head label="3D GLOBE UNAVAILABLE" />
+                  <h3>This browser could not start the 3D globe</h3>
+                  <p>WebGL is turned off or not supported here. The polar map and every calculation work without it.</p>
+                  <div className="btn-row">
+                    <button className="btn primary" onClick={() => setStage("map")}>Open the polar map</button>
+                  </div>
+                </Panel>
+              </div>
+            )}>
+              <Suspense fallback={null}>
+                <Globe data={data} selectedId={hideSel ? null : selectedId} sunPctById={sunPctById}
+                       sunDir={dirs.sun} earthDir={dirs.earth} onPick={pickLatLon} onZoomPole={() => setStage("map")}
+                  missions={missionsList} missionId={missionId} focus={globeFocus} />
+              </Suspense>
+            </ErrorBoundary>
           </div>
           {mapSeen && (
             <div className="stage-layer" hidden={stage !== "map"}>
