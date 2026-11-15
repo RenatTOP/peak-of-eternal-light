@@ -1,4 +1,16 @@
 {
+ "data/dem/global/ldem_64.img": {
+  "bytes": 530841600,
+  "checked_at": "2026-10-28T19:57:39+00:00",
+  "group": "global",
+  "url": "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/lola_gdr/cylindrical/img/ldem_64.img"
+ },
+ "data/dem/global/ldem_64.lbl": {
+  "bytes": 5128,
+  "checked_at": "2026-10-28T19:49:23+00:00",
+  "group": "global",
+  "url": "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/lola_gdr/cylindrical/img/ldem_64.lbl"
+ },
  "data/dem/regional/LDEM_60S_120MPP_ADJ.TIF": {
   "bytes": 821504895,
   "checked_at": "2026-09-26T10:28:13+00:00",

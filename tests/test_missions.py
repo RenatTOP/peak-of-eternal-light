@@ -30,7 +30,7 @@ def test_coordinates_and_sites():
     sites = load_sites()
     for m in _missions():
         w = m["where"]
-        assert w["precision"] in ("landed", "region", "none")
+        assert w["precision"] in ("landed", "impact", "region", "none")
         if w["precision"] != "none":
             assert -90 <= w["lat"] <= 90 and -180 <= w["lon"] <= 360
         if w["precision"] == "region":

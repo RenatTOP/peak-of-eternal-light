@@ -1,14 +1,17 @@
-# CLPS missions (NASA Commercial Lunar Payload Services) as of late September 2026.
+# CLPS missions (NASA Commercial Lunar Payload Services) as of late September 2026,
+# plus other landings for context (others): recent, failed and Apollo.
 #
 # Fields:
 #   status    — success | partial | failure | planned
 #   launch    — launch date (ISO if flown, else plan text as in the source: "NET Q1 2027")
 #   landing   — actual landing, UTC; end — end of surface operations
 #   site      — catalog site id (data/sites.yaml), if the landing site is in it
-#   where     — landing point (precision: landed) or region centre (precision: region, radius_km)
-#               per the IAU gazetteer; exact points of planned missions are unpublished
-#   window    — period analysed in the browser (landing to end of operations, with margin)
-#   payloads  — NASA payloads
+#   where     — landing point (precision: landed), impact site (impact) or region centre
+#               (precision: region, radius_km) per the IAU gazetteer; exact points of planned
+#               missions are unpublished; east longitude, negative = west
+#   window    — period analysed in the browser (landing to end of operations, with margin);
+#               the cursor starts at touchdown
+#   payloads  — payloads (NASA's, for CLPS)
 #   sources   — data sources
 #
 # Overview: science.nasa.gov/lunar-science/clps-deliveries, en.wikipedia.org/wiki/Commercial_Lunar_Payload_Services
@@ -55,6 +58,7 @@ missions:
     status: success
     outcome: "First fully successful commercial Moon landing; all 10 NASA payloads returned data through a full lunar day until the batteries ran out after sunset."
     where: {name: "Mare Crisium, near Mons Latreille", lat: 18.567, lon: 61.817, precision: landed}
+    window: ["2025-03-02", "2025-03-18"]
     payloads: [Regolith Adherence Characterization, Next Generation Lunar Retroreflector, LEXI X-ray imager,
                RadPC radiation-tolerant computer, Lunar Magnetotelluric Sounder, LISTER heat-flow drill, Lunar PlanetVac,
                SCALPSS 1.1 plume cameras, Electrodynamic Dust Shield, Lunar GNSS Receiver Experiment]
@@ -196,7 +200,8 @@ missions:
     payloads: []
     sources: [https://science.nasa.gov/lunar-science/clps-deliveries/]
 
-# Not CLPS, but landed near the pole: for context
+# Non-CLPS, for context: other recent landings (failed ones at their impact site) and Apollo.
+# precision: impact — impact site from LRO images
 others:
   - id: chandrayaan-3
     name: Chandrayaan-3 · Vikram
@@ -212,3 +217,210 @@ others:
     window: ["2023-08-23", "2023-09-25"]
     payloads: []
     sources: [https://en.wikipedia.org/wiki/Chandrayaan-3]
+
+  - id: change-3
+    name: Chang’e 3 · Yutu
+    provider: CNSA
+    lander: Chang’e 3
+    launch: "2013-12-01"
+    landing: "2013-12-14T13:11Z"
+    status: success
+    outcome: "First soft landing on the Moon since 1976; the Yutu rover drove 114 m, and the lander kept working for years, sleeping through each lunar night."
+    where: {name: "Mare Imbrium, Statio Guang Han", lat: 44.1214, lon: -19.5116, precision: landed}
+    window: ["2013-12-14", "2013-12-28"]
+    payloads: [Yutu rover, Lunar-based Ultraviolet Telescope, Extreme Ultraviolet Camera]
+    sources: [https://en.wikipedia.org/wiki/Chang%27e_3]
+
+  - id: change-4
+    name: Chang’e 4 · Yutu-2
+    provider: CNSA
+    lander: Chang’e 4
+    launch: "2018-12-07"
+    landing: "2019-01-03T02:26Z"
+    status: success
+    outcome: "First landing on the far side, in Von Kármán crater. Earth never rises here, so all contact goes through the Queqiao relay satellite."
+    where: {name: "Von Kármán crater, Statio Tianhe", lat: -45.4446, lon: 177.5991, precision: landed}
+    window: ["2019-01-03", "2019-01-17"]
+    payloads: [Yutu-2 rover, Lunar Lander Neutrons and Dosimetry, Low Frequency Spectrometer]
+    sources: [https://en.wikipedia.org/wiki/Chang%27e_4]
+
+  - id: change-5
+    name: Chang’e 5
+    provider: CNSA
+    lander: Chang’e 5
+    launch: "2020-11-23"
+    landing: "2020-12-01T15:11Z"
+    end: "2020-12-03T15:10Z"
+    status: success
+    outcome: "Drilled and scooped 1.7 kg of young volcanic soil near Mons Rümker and launched it back to Earth two days after landing."
+    where: {name: "Oceanus Procellarum, near Mons Rümker", lat: 43.0576, lon: -51.9161, precision: landed}
+    window: ["2020-12-01", "2020-12-15"]
+    payloads: [Sample drill and scoop, Lunar Regolith Penetrating Radar, Lunar Mineralogical Spectrometer]
+    sources: [https://en.wikipedia.org/wiki/Chang%27e_5]
+
+  - id: change-6
+    name: Chang’e 6
+    provider: CNSA
+    lander: Chang’e 6
+    launch: "2024-05-03"
+    landing: "2024-06-01T22:23Z"
+    end: "2024-06-03T23:38Z"
+    status: success
+    outcome: "First samples from the far side: 1.9 kg from the Apollo basin inside South Pole–Aitken, with the Queqiao-2 relay carrying the link to Earth."
+    where: {name: "Apollo basin (far side)", lat: -41.6385, lon: -153.9852, precision: landed}
+    window: ["2024-06-01", "2024-06-15"]
+    payloads: [Sample drill and scoop, DORN radon detector, NILS negative-ion analyser, INRRI laser retroreflector]
+    sources: [https://en.wikipedia.org/wiki/Chang%27e_6]
+
+  - id: slim
+    name: SLIM
+    provider: JAXA
+    lander: SLIM
+    launch: "2023-09-06"
+    landing: "2024-01-19T15:20Z"
+    end: "2024-04-23"
+    status: partial
+    outcome: "Landed within 55 m of its target but upside down, with its solar panel facing west: it got power only once the afternoon Sun swung round, and it survived three lunar nights."
+    where: {name: "Shioli crater, near Theophilus", lat: -13.316, lon: 25.251, precision: landed}
+    window: ["2024-01-19", "2024-02-02"]
+    payloads: [Multi-Band Camera, LEV-1 and LEV-2 (SORA-Q) mini-rovers]
+    sources: [https://en.wikipedia.org/wiki/Smart_Lander_for_Investigating_Moon]
+
+  - id: luna-25
+    name: Luna 25
+    provider: Roscosmos
+    lander: Luna-Glob
+    launch: "2023-08-10"
+    status: failure
+    outcome: "An engine burn ran too long while lowering its orbit before landing; the probe crashed on 19 Aug 2023, short of its target near Boguslawsky crater."
+    where: {name: "Impact site, Pontécoulant G crater", lat: -57.865, lon: 61.360, precision: impact}
+    payloads: []
+    sources: [https://en.wikipedia.org/wiki/Luna_25]
+
+  - id: chandrayaan-2
+    name: Chandrayaan-2 · Vikram
+    provider: ISRO
+    lander: Vikram
+    launch: "2019-07-22"
+    status: failure
+    outcome: "Lost control in the final braking phase and crashed on 6 Sep 2019 about 750 m from its target, between Manzinus C and Simpelius N."
+    where: {name: "Impact site, between Manzinus C and Simpelius N", lat: -70.8810, lon: 22.7840, precision: impact}
+    payloads: []
+    sources: [https://en.wikipedia.org/wiki/Chandrayaan-2]
+
+  - id: beresheet
+    name: Beresheet
+    provider: SpaceIL / IAI
+    lander: Beresheet
+    launch: "2019-02-22"
+    status: failure
+    outcome: "A gyroscope fault cascaded into a main-engine shutdown during descent; the first privately funded lander crashed on 11 Apr 2019."
+    where: {name: "Impact site, Mare Serenitatis", lat: 32.5956, lon: 19.3496, precision: impact}
+    payloads: [Laser Retroreflector Array (NASA)]
+    sources: [https://en.wikipedia.org/wiki/Beresheet]
+
+  - id: hakuto-r-1
+    name: HAKUTO-R Mission 1
+    provider: ispace
+    lander: Series 1
+    launch: "2022-12-11"
+    status: failure
+    outcome: "Its altimeter reading was rejected after it crossed a crater rim, so it believed it was lower than it was, ran out of fuel and fell on 25 Apr 2023."
+    where: {name: "Impact site, Atlas crater", lat: 47.581, lon: 44.094, precision: impact}
+    payloads: [Rashid rover (UAE), SORA-Q transformable robot]
+    sources: [https://en.wikipedia.org/wiki/Hakuto-R_Mission_1]
+
+  - id: resilience
+    name: ispace Mission 2 · Resilience
+    provider: ispace
+    lander: Series 1
+    launch: "2025-01-15"
+    status: failure
+    outcome: "The laser rangefinder was late to measure the altitude, so the lander could not slow down in time and crashed in Mare Frigoris on 5 Jun 2025."
+    where: {name: "Impact site, Mare Frigoris", lat: 60.5, lon: -4.6, precision: impact}
+    payloads: [Tenacious micro-rover]
+    sources: [https://en.wikipedia.org/wiki/Hakuto-R_Mission_2]
+
+  - id: apollo-11
+    name: Apollo 11 · Eagle
+    provider: NASA
+    lander: Lunar Module
+    launch: "1969-07-16"
+    landing: "1969-07-20T20:17Z"
+    end: "1969-07-21T17:54Z"
+    status: success
+    outcome: "First crewed landing. Armstrong and Aldrin spent 21.5 hours on the surface and 2.5 hours outside; the low morning Sun was chosen so craters cast long, readable shadows."
+    where: {name: "Tranquility Base, Mare Tranquillitatis", lat: 0.67408, lon: 23.47297, precision: landed}
+    window: ["1969-07-20", "1969-08-03"]
+    payloads: [Early Apollo Scientific Experiments Package, Laser Ranging Retroreflector, Solar Wind Composition]
+    sources: [https://en.wikipedia.org/wiki/Apollo_11, https://www.nasa.gov/history/alsj/]
+
+  - id: apollo-12
+    name: Apollo 12 · Intrepid
+    provider: NASA
+    lander: Lunar Module
+    launch: "1969-11-14"
+    landing: "1969-11-19T06:54Z"
+    end: "1969-11-20T14:25Z"
+    status: success
+    outcome: "Pinpoint landing 180 m from the Surveyor 3 probe, which the crew visited and brought parts of back to Earth."
+    where: {name: "Oceanus Procellarum, near Surveyor 3", lat: -3.01239, lon: -23.42157, precision: landed}
+    window: ["1969-11-19", "1969-12-03"]
+    payloads: [ALSEP science station, Solar Wind Composition]
+    sources: [https://en.wikipedia.org/wiki/Apollo_12, https://www.nasa.gov/history/alsj/]
+
+  - id: apollo-14
+    name: Apollo 14 · Antares
+    provider: NASA
+    lander: Lunar Module
+    launch: "1971-01-31"
+    landing: "1971-02-05T09:18Z"
+    end: "1971-02-06T18:48Z"
+    status: success
+    outcome: "Landed at Fra Mauro, Apollo 13’s target; the crew hauled a hand cart towards Cone crater and stopped about 20 m short of its rim."
+    where: {name: "Fra Mauro highlands", lat: -3.6453, lon: -17.47136, precision: landed}
+    window: ["1971-02-05", "1971-02-19"]
+    payloads: [ALSEP science station, Laser Ranging Retroreflector, Modular Equipment Transporter]
+    sources: [https://en.wikipedia.org/wiki/Apollo_14, https://www.nasa.gov/history/alsj/]
+
+  - id: apollo-15
+    name: Apollo 15 · Falcon
+    provider: NASA
+    lander: Lunar Module
+    launch: "1971-07-26"
+    landing: "1971-07-30T22:16Z"
+    end: "1971-08-02T17:11Z"
+    status: success
+    outcome: "First Lunar Roving Vehicle, between Hadley Rille and the Apennine mountains, which rise up to 4.5 km over the plain."
+    where: {name: "Hadley–Apennine", lat: 26.13222, lon: 3.63386, precision: landed}
+    window: ["1971-07-30", "1971-08-13"]
+    payloads: [ALSEP science station, Lunar Roving Vehicle, Laser Ranging Retroreflector]
+    sources: [https://en.wikipedia.org/wiki/Apollo_15, https://www.nasa.gov/history/alsj/]
+
+  - id: apollo-16
+    name: Apollo 16 · Orion
+    provider: NASA
+    lander: Lunar Module
+    launch: "1972-04-16"
+    landing: "1972-04-21T02:23Z"
+    end: "1972-04-24T01:25Z"
+    status: success
+    outcome: "The only Apollo landing in the central highlands; three days on the surface and three rover traverses."
+    where: {name: "Descartes highlands", lat: -8.97301, lon: 15.50019, precision: landed}
+    window: ["1972-04-21", "1972-05-05"]
+    payloads: [ALSEP science station, Lunar Roving Vehicle, Far Ultraviolet Camera]
+    sources: [https://en.wikipedia.org/wiki/Apollo_16, https://www.nasa.gov/history/alsj/]
+
+  - id: apollo-17
+    name: Apollo 17 · Challenger
+    provider: NASA
+    lander: Lunar Module
+    launch: "1972-12-07"
+    landing: "1972-12-11T19:54Z"
+    end: "1972-12-14T22:54Z"
+    status: success
+    outcome: "The last crewed landing so far: 75 hours in a valley walled by 2 km massifs, with geologist Harrison Schmitt on the crew."
+    where: {name: "Taurus–Littrow valley", lat: 20.1908, lon: 30.77168, precision: landed}
+    window: ["1972-12-11", "1972-12-25"]
+    payloads: [ALSEP science station, Lunar Roving Vehicle, Traverse Gravimeter]
+    sources: [https://en.wikipedia.org/wiki/Apollo_17, https://www.nasa.gov/history/alsj/]

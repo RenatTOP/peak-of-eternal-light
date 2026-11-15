@@ -59,7 +59,7 @@ TILE = 256
 BASE_MAX_Z = 5
 DETAIL_ZOOMS = (6, 7)  # z6: whole map to 60°; z7: square to 75° (30 and 40 m there)
 
-EPHEM_START = "2023-07-01T00:00:00"
+EPHEM_START = "1969-07-01T00:00:00"  # from Apollo 11
 EPHEM_STEP_S = 6 * 3600.0
 EPHEM_END = "2036-01-01T00:00:00"
 
@@ -74,10 +74,14 @@ def log(msg: str) -> None:
 
 
 def build_ephem() -> None:
-    et0, et1 = spice.str2et(EPHEM_START), spice.str2et(EPHEM_END)
     # 6 h step + cubic interpolation in the browser: direction error < 2e-5° (hourly linear
-    # gave up to 6e-4°) and a 6x smaller file: 0.44 MB instead of 2.5
-    ets = np.arange(et0, et1 + EPHEM_STEP_S, EPHEM_STEP_S)
+    # gave up to 6e-4°) and a 6x smaller file (2.2 MB for 1969–2036 instead of 13).
+    # Nodes uniform in UTC, as the browser reads them (Date has no leap seconds): uniform in ET
+    # they would drift ~29 s over 1969–2028, i.e. 0.004° of lunar rotation.
+    u0 = spice.str2et(EPHEM_START) - spice.deltet(spice.str2et(EPHEM_START), "ET")
+    u1 = spice.str2et(EPHEM_END) - spice.deltet(spice.str2et(EPHEM_END), "ET")
+    utc = np.arange(u0, u1 + EPHEM_STEP_S / 2, EPHEM_STEP_S)
+    ets = np.array([u + spice.deltet(u, "UTC") for u in utc])
     sun = body_positions("SUN", ets)
     earth = body_positions("EARTH", ets)
     arr = np.concatenate([sun, earth], axis=1).astype("<f4")  # (n, 6)

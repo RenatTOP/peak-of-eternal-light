@@ -32,6 +32,8 @@ MAPS_PSR = DATA / "maps" / "psr"
 MAPS_ILLUM = DATA / "maps" / "illumination"
 MOONKIT = DATA / "moonkit"
 MOONKIT_URL = "https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720"
+DEM_GLOBAL = DATA / "dem" / "global"
+LOLA_GDR = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/lola_gdr/cylindrical"
 
 PGDA = "https://pgda.gsfc.nasa.gov/data"
 
@@ -193,9 +195,20 @@ def _globe() -> list[Item]:
     ]
 
 
+def _global() -> list[Item]:
+    """LOLA GDR 64 px/° (~474 m at the equator): terrain for points outside the polar zone."""
+    return [
+        Item(f"{LOLA_GDR}/img/ldem_64.img", DEM_GLOBAL / "ldem_64.img", 506.3, "global",
+             "global LOLA terrain 64 px/°, int16 x 0.5 m, horizon of any point 60°S..90°N"),
+        Item(f"{LOLA_GDR}/img/ldem_64.lbl", DEM_GLOBAL / "ldem_64.lbl", 0.01, "global",
+             "PDS label: size, scale, projection"),
+    ]
+
+
 GROUPS = {
     "kernels": _kernels,
     "globe": _globe,
+    "global": _global,
     "validation": _validation,
     "sites": _sites,
     "regional": _regional,
@@ -203,7 +216,7 @@ GROUPS = {
 }
 
 # Order matters: small and critical first, clones last.
-DEFAULT_ORDER = ("kernels", "globe", "validation", "sites", "regional", "clones")
+DEFAULT_ORDER = ("kernels", "globe", "global", "validation", "sites", "regional", "clones")
 
 
 def items_for(groups: list[str]) -> list[Item]:
