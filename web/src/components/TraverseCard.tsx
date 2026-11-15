@@ -67,7 +67,7 @@ export function TraverseCard(p: Props) {
   const s = p.state;
   return (
     <Panel className="left scroll">
-      <Head num="01" label="TRAVERSE" right={p.example ? "example route, not a real plan" : "your route"} />
+      <Head num="01" label="TRAVERSE" right={p.example ? "example, not a real plan" : "your route"} />
       <div className="title">Rover traverse</div>
       <div className="coords">
         {p.waypoints} waypoints · {km(p.lengthM)}
@@ -150,7 +150,7 @@ export function TraverseCard(p: Props) {
             </div>
           )}
           <div style={{ marginTop: 12 }}>
-            <Head label="WHEN TO START" right={`each day of ${new Date(p.periodStart).getUTCFullYear()}, ${Math.round(Math.min(p.periodDays, 60))}-day window`} />
+            <Head label="WHEN TO START" right={`${new Date(p.periodStart).getUTCFullYear()} · ${Math.round(Math.min(p.periodDays, 60))}-day window`} />
           </div>
           <DateStrip days={p.departures && p.departures.map((d) => ({ t: d.t, v: DEP_MARK[d.v] }))} current={p.periodStart}
                      onPick={p.onStart} title="Click a day to start the traverse then" />
@@ -167,7 +167,7 @@ export function TraverseCard(p: Props) {
             <span><i className="dash" />not reached</span>
             <span><i style={{ background: T.empty }} />slope &gt; {STEEP_DEG}°</span>
           </div>
-          <div style={{ marginTop: 12 }}><Head label="ALONG THE TRAVERSE" right="what the rover sees where it is" /></div>
+          <div style={{ marginTop: 12 }}><Head label="ALONG THE TRAVERSE" right="as the rover sees it" /></div>
           <MetricGauges m={s.metrics} periodDays={p.periodDays} />
           {p.power}
         </>
@@ -381,7 +381,10 @@ function RouteProfile({ rh, run, exposure, slopes, cursor, onCursor }: {
     onCursor(i);
   };
 
-  return <canvas ref={ref} className="trav-profile" onClick={click}
+  return <canvas ref={ref} className="trav-profile" onClick={click} role="img"
+                 aria-label={`Elevation profile along the ${(run.length / 1000).toFixed(1)} km route, ` +
+                   `${Math.round(Math.min(...rh.ground))} to ${Math.round(Math.max(...rh.ground))} m; ` +
+                   `${slopes.filter((s) => s > STEEP_DEG).length} steps steeper than ${STEEP_DEG} degrees.`}
                  title="Click to jump to the moment the rover passes this point" />;
 }
 

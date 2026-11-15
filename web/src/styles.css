@@ -26,7 +26,8 @@
 html, body, #root { height: 100%; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 var(--sans); }
 button { font: inherit; color: inherit; cursor: pointer; }
-button:focus-visible, input:focus-visible { outline: 2px solid var(--brk); outline-offset: 2px; }
+button:focus-visible, input:focus-visible, select:focus-visible, canvas:focus-visible, a:focus-visible {
+  outline: 2px solid var(--brk); outline-offset: 2px; }
 h1, h2, h3 { margin: 0; font-weight: 600; }
 .mono { font-family: var(--mono); }
 .muted { color: var(--muted); }
@@ -42,7 +43,7 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .brand-sub { font-size: 11.5px; color: var(--muted); letter-spacing: 0.04em; white-space: nowrap; }
 .nav { display: flex; gap: 28px; margin: 0 auto; align-self: stretch; }
 .nav button { background: none; border: 0; padding: 0 6px; font-size: 13px; font-weight: 600; letter-spacing: 0.14em;
-              color: var(--muted); }
+              color: var(--muted); white-space: nowrap; }
 .nav button.on { color: var(--text); box-shadow: inset 0 -2px 0 var(--brk); }
 .clock { display: flex; align-items: baseline; gap: 10px; font-family: var(--mono); white-space: nowrap; }
 .clock-date { font-size: 12px; color: var(--muted); }
@@ -215,7 +216,8 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
         color: var(--text); font-size: 12.5px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
 .tool:hover { border-color: var(--brk); }
 .map-earth { position: absolute; right: 16px; top: 18px; z-index: 500; display: flex; align-items: center; gap: 8px;
-             font: 11px var(--mono); color: var(--earth); pointer-events: none; }
+             font: 11px var(--mono); color: var(--earth); pointer-events: none;
+             padding: 4px 8px; background: rgba(6, 16, 27, 0.85); }
 .chips { position: absolute; left: 14px; bottom: 14px; z-index: 500; display: flex; gap: 6px; flex-wrap: wrap; }
 .chip { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; background: rgba(6, 16, 27, 0.92);
         border: 1px solid var(--line); color: var(--muted); font-size: 12.5px; }
@@ -347,8 +349,25 @@ button.crow.on { background: rgba(255, 181, 71, 0.08); border-left-color: var(--
   .presets button { padding: 0 7px; }
   .brand-sub { display: none; }
 }
+@media (max-width: 1279px) {
+  /* three columns are too tight here (map < 450 px): map above RESULT, left panel full height */
+  .explore { grid-template-columns: 340px minmax(0, 1fr); grid-template-rows: minmax(0, 1.35fr) minmax(0, 1fr) auto; }
+  .explore .left { grid-column: 1; grid-row: 1 / 3; }
+  .explore .stage { grid-column: 2; grid-row: 1; }
+  .explore .right { grid-column: 2; grid-row: 2; }
+  .explore .right .log { min-height: 150px; } /* the window list doesn't shrink to zero; the panel scrolls */
+  .explore .bottom { grid-row: 3; }
+  /* header: denser menu, Share as an icon, smaller clock */
+  .topbar { gap: 10px; padding: 0 16px; }
+  .nav { gap: 14px; }
+  .nav button { letter-spacing: 0.1em; font-size: 12.5px; }
+  .topbar .share { min-width: 0; padding: 0 9px; margin-right: 4px; }
+  .topbar .share span { display: none; }
+  .clock { gap: 6px; }
+  .clock-time { font-size: 22px; }
+}
 @media (max-width: 1180px) {
-  .explore { grid-template-columns: 320px minmax(0, 1fr) 340px; }
+  .explore { grid-template-columns: 320px minmax(0, 1fr); }
 }
 
 @media (max-width: 960px) {
@@ -373,8 +392,21 @@ button.crow.on { background: rgba(255, 181, 71, 0.08); border-left-color: var(--
   .presets button { height: 36px; flex-shrink: 0; }
   .rank button, .tabs button, .link { min-height: 44px; }
   .tool { height: 44px; min-width: 44px; }
-  .compare { grid-template-columns: 1fr; padding: 12px 16px; }
-  .missions { grid-template-columns: 1fr; padding: 12px 16px; }
+  /* minmax(0, …): the column shrinks to the screen and a wide table scrolls inside */
+  .compare { grid-template-columns: minmax(0, 1fr); padding: 12px 16px; }
+  .missions { grid-template-columns: minmax(0, 1fr); padding: 12px 16px; }
+  .head-right { min-width: 0; }
+  /* touch targets at least ~40 px */
+  .seg button { min-height: 40px; }
+  .pw-input input { min-height: 38px; font-size: 16px; } /* 16 px: iOS doesn't zoom on focus */
+  .pw-preset { min-height: 36px; }
+  .chip { min-height: 40px; }
+  .msrc a { display: inline-block; padding: 8px 0; }
+  .clanding .seg { min-width: 0; width: 100%; }
+  .date-strip { min-height: 24px; }
+  .topbar .share { height: 38px; min-width: 38px; }
+  .date input { min-height: 40px; font-size: 16px; width: 172px; }
+  .map-readout span { display: none; } /* no cursor coordinates without a mouse; the hint only gets in the way */
   .myear { grid-template-columns: 1fr; }
   .myear-label { border-top: 0; padding: 0 0 4px; }
   .mrow { min-height: 44px; grid-template-columns: 14px minmax(0, 1fr); }

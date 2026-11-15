@@ -132,10 +132,33 @@ export function Timeline({ series, soc, cursor, onCursor }: Props) {
     onCursor(Math.round(Math.min(Math.max(f, 0), 1) * (series.t.length - 1)));
   };
 
+  // keyboard: ←/→ step, Page Up/Down day, Home/End period ends
+  const n = series.t.length;
+  const perDay = Math.max(1, Math.round(DAY_MS / series.stepMs));
+  const key = (e: React.KeyboardEvent<HTMLCanvasElement>) => {
+    const d = { ArrowLeft: -1, ArrowRight: 1, ArrowDown: -1, ArrowUp: 1, PageDown: -perDay, PageUp: perDay } as Record<string, number>;
+    let i: number | null = null;
+    if (e.key in d) i = cursor + d[e.key] * (e.shiftKey ? 10 : 1);
+    else if (e.key === "Home") i = 0;
+    else if (e.key === "End") i = n - 1;
+    if (i === null) return;
+    e.preventDefault();
+    onCursor(Math.min(Math.max(i, 0), n - 1));
+  };
+  const now = series.t[Math.min(Math.max(cursor, 0), n - 1)];
+
   return (
     <canvas
       ref={ref}
       className="chart timeline"
+      tabIndex={0}
+      role="slider"
+      aria-label="Time cursor: Sun, Earth and battery over the period"
+      aria-valuemin={0}
+      aria-valuemax={n - 1}
+      aria-valuenow={cursor}
+      aria-valuetext={now ? `${new Date(now).toISOString().slice(0, 16).replace("T", " ")} UTC` : undefined}
+      onKeyDown={key}
       onPointerDown={(e) => {
         e.currentTarget.setPointerCapture(e.pointerId);
         pick(e);

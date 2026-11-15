@@ -128,11 +128,29 @@ export function LandingChart({ days, missionDays, current, onPick, height = 78, 
     return Math.floor((t - y0) / 86_400_000) * 86_400_000 + y0;
   };
   const idxAt = (t: number) => (days ? days.findIndex((d) => d.t === t) : -1);
+  // accessibility: the full chart is a landing-date slider (←/→ day, Page Up/Down week), the small one only a description
+  const good = days?.filter((d) => d.v !== "fails").length ?? 0;
+  const best = days?.reduce<LandingDay | null>((b, d) => (!b || d.life > b.life ? d : b), null);
+  const label = days
+    ? `How long the craft lasts by landing date in ${year}: the whole ${lifeDaysText(missionDays)} mission on ${good} of ${days.length} days` +
+      (best && best.life < 1 ? `; at best ${lifeDaysText(best.life * missionDays)} if it lands on ${fmtDate(best.t)}.` : ".")
+    : "Checking every landing date.";
+  const a11y = compact
+    ? { role: "img", "aria-label": label }
+    : {
+        role: "slider", tabIndex: 0, "aria-label": label, "aria-valuetext": fmtDate(current),
+        onKeyDown: (e: React.KeyboardEvent<HTMLCanvasElement>) => {
+          const step = ({ ArrowLeft: -1, ArrowRight: 1, PageDown: -7, PageUp: 7 } as Record<string, number>)[e.key];
+          if (step === undefined) return;
+          e.preventDefault();
+          onPick(Math.floor(current / 86_400_000) * 86_400_000 + step * 86_400_000);
+        },
+      };
   const h = hover !== null ? days?.[hover] : null;
 
   return (
     <>
-      <canvas ref={ref} className="date-strip" style={{ height }}
+      <canvas ref={ref} className="date-strip" style={{ height }} {...a11y}
               onClick={(e) => { e.stopPropagation(); onPick(dayAt(e)); }}
               onMouseMove={(e) => { const i = idxAt(dayAt(e)); setHover(i >= 0 ? i : null); }}
               onMouseLeave={() => setHover(null)}

@@ -38,7 +38,7 @@ export function ResultPanel({ what, horizon, analysis, cursor, onCursor }: Props
   const t0 = s.t[0];
 
   return (
-    <Panel className="right">
+    <Panel className="right scroll">
       <Head num="03" label="RESULT" right={`for this ${what} and period`} />
       <div className="sub-title">{what === "route" ? "Horizon where the rover is now" : `Horizon from the ${what}`}</div>
       <div className="sub-note">

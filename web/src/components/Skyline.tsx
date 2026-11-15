@@ -137,7 +137,11 @@ export function Skyline({ horizon, series, cursor }: Props) {
     ctx.setLineDash([]);
   }, [horizon, series, cursor, size]);
 
-  return <canvas ref={ref} className="chart skyline" />;
+  return (
+    <canvas ref={ref} className="chart skyline" role="img"
+            aria-label={`Horizon around the site, all 360 degrees of azimuth: terrain rises to ${horizon.max.toFixed(1)} degrees. ` +
+              "Amber lines are the Sun's path over the period, blue the Earth's."} />
+  );
 }
 
 function quantile(a: Float32Array, q: number): number {

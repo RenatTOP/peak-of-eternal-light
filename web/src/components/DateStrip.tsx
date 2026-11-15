@@ -81,5 +81,17 @@ export function DateStrip({ days, current, onPick, title, height = 34, months = 
     const t = y0 + ((e.clientX - r.left) / r.width) * yLen;
     onPick(Math.floor((t - y0) / 86_400_000) * 86_400_000 + y0);
   };
-  return <canvas ref={ref} className="date-strip" style={{ height }} onClick={click} title={title} />;
+  const count = (v: DayMark) => days?.filter((d) => d.v === v).length ?? 0;
+  const key = (e: React.KeyboardEvent<HTMLCanvasElement>) => {
+    const step = { ArrowLeft: -1, ArrowRight: 1, PageDown: -7, PageUp: 7 }[e.key];
+    if (step === undefined) return;
+    e.preventDefault();
+    onPick(Math.floor(current / 86_400_000) * 86_400_000 + step * 86_400_000);
+  };
+  return (
+    <canvas ref={ref} className="date-strip" style={{ height }} onClick={click} title={title}
+            tabIndex={0} role="slider" onKeyDown={key}
+            aria-label={`${title} ${days ? `${count("good")} good, ${count("mid")} borderline and ${count("bad")} bad days.` : ""}`}
+            aria-valuetext={new Date(current).toISOString().slice(0, 10)} />
+  );
 }

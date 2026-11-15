@@ -22,7 +22,7 @@ export function LandingCard({ days, missionDays, onMissionDays, current, onPick 
   const sum = days && landingSummary(days);
   return (
     <div className="landing">
-      <Head label="BEST LANDING DATES" right={`${year} · craft from the power check`} />
+      <Head label="BEST LANDING DATES" right={`${year} · power-check craft`} />
       <div className="seg" role="group" aria-label="Mission length" style={{ marginTop: 8 }}>
         {MISSION_LENGTHS.map(([d, l]) => (
           <button key={l} className={Math.abs(d - missionDays) < 0.01 ? "on" : ""} onClick={() => onMissionDays(d)}>{l}</button>
