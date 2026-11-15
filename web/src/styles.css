@@ -138,8 +138,20 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .sub-note { font-size: 12px; color: var(--muted); margin-top: 2px; }
 .chart { display: block; width: 100%; }
 .skyline { width: 100%; aspect-ratio: 5 / 2; min-height: 150px; max-height: 190px; margin-top: 8px; }
-.sky { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; font: 12px var(--mono); }
-.sky div { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* sky at the cursor: elevation and time to the next set / rise */
+.sky-now { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+.sky-card { display: flex; flex-direction: column; gap: 3px; padding: 8px 10px 9px; min-width: 0;
+            border: 1px solid var(--line); border-left: 2px solid var(--c); background: rgba(6, 16, 27, 0.55); }
+.sky-card.off { border-left-style: dashed; }
+.sky-card .state { display: flex; align-items: center; gap: 7px; font-size: 12px; }
+.sky-card .elev { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 6px; margin-top: 2px; }
+.sky-card .elev b { font-size: 22px; font-weight: 500; color: var(--c); letter-spacing: -0.02em; line-height: 1.1; }
+.sky-card .elev span { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+.sky-card .clear { font-size: 11px; }
+.sky-card .next { display: flex; flex-direction: column; gap: 1px; margin-top: 5px; padding-top: 6px;
+                  border-top: 1px solid var(--line); }
+.sky-card .next b { font-size: 12.5px; font-weight: 600; }
+.sky-card .next > span { font-size: 10.5px; line-height: 1.35; }
 .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; box-sizing: border-box; }
 .tabs { display: flex; gap: 16px; margin-top: 16px; border-bottom: 1px solid var(--line); }
 .tabs button { background: none; border: 0; padding: 0; height: 30px; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
@@ -493,6 +505,7 @@ button.crow.on { background: rgba(255, 181, 71, 0.08); border-left-color: var(--
 .v3-readout { position: absolute; left: 14px; bottom: 44px; display: flex; flex-direction: column; gap: 6px; padding: 8px 12px;
               background: rgba(3, 7, 13, 0.72); border: 1px solid var(--line); font: 12px var(--mono); pointer-events: none; }
 .v3-readout div { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.v3-readout .v3-next { font-size: 11.5px; font-weight: 600; }
 .v3-foot { position: absolute; left: 14px; right: 14px; bottom: 12px; display: flex; justify-content: space-between; gap: 16px;
            font-size: 10.5px; color: var(--muted); pointer-events: none; text-shadow: 0 0 3px #000; }
 .v3-foot span:last-child { text-align: right; }

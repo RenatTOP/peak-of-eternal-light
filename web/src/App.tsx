@@ -21,6 +21,7 @@ import { analyze, computeSeries, computeTrack, latLonToXY, xyToLatLon, type Anal
 import { loadAppData, loadClones, loadVisMap, type AppData, type LoadStep, type Mission, type SiteInfo } from "./lib/data";
 import { batteryNeeded, generation, POWER_PRESETS, simulate, type PowerConfig } from "./lib/power";
 import { terrainSpread } from "./lib/spread";
+import { eventText, nextEvent } from "./lib/events";
 import { autoStepMs, DAY_MS, fmtLat, fmtLon, HOUR_MS } from "./lib/format";
 import {
   departureScan, routeExposure, routeHorizons, routeLength, routeSlopes, sampleRoute, simulateTraverse,
@@ -692,6 +693,10 @@ export default function App() {
   const readout: ViewReadout | null = sNow && horizonNow && n ? {
     sunFrac: sNow.sunFrac[iNow], sunClear: sNow.sunAlt[iNow] - horizonNow.at(sNow.sunAz[iNow]),
     earthFrac: sNow.earthFrac[iNow], earthClear: sNow.earthAlt[iNow] - horizonNow.at(sNow.earthAz[iNow]),
+    sunAlt: sNow.sunAlt[iNow],
+    // same countdown as in RESULT (on a route, to step precision)
+    sunNext: eventText(nextEvent(sNow, iNow, "sun", view?.what === "route" ? null : horizonNow), "sun", sNow.t[iNow]),
+    earthNext: eventText(nextEvent(sNow, iNow, "earth", view?.what === "route" ? null : horizonNow), "earth", sNow.t[iNow]),
   } : null;
   const can3d = !!viewTarget && !!data.anyPoint;
   // a route reads best from above first, a place from the ground

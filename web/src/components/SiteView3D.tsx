@@ -40,6 +40,9 @@ export interface ViewReadout {
   sunClear: number; // ° above terrain (negative = behind a ridge)
   earthFrac: number;
   earthClear: number;
+  sunAlt: number; // ° above the sphere's horizon
+  sunNext: string; // «Sunset in 3 d 4 h»
+  earthNext: string;
 }
 
 export interface Landmark {
@@ -671,12 +674,14 @@ export default function SiteView3D({ ephem, anyPoint, target, t, readout, landma
           <div>
             <span className="dot" style={r.sunFrac > 0 ? { background: T.sun } : { border: `1.5px solid ${T.sun}` }} />
             <span>{r.sunFrac >= 0.999 ? "Sun in view" : r.sunFrac > 0 ? `Sun ${Math.round(r.sunFrac * 100)}% visible` : "Sun hidden"}</span>
-            <span className="muted mono">{clearText(r.sunClear)} · az {fmtAz(sky.sunAz)}</span>
+            <span className="muted mono">elev {r.sunAlt.toFixed(2)}° · {clearText(r.sunClear)} · az {fmtAz(sky.sunAz)}</span>
+            <span className="v3-next mono" style={{ color: T.sun }}>{r.sunNext}</span>
           </div>
           <div>
             <span className="dot" style={r.earthFrac > 0 ? { background: T.earth } : { border: `1.5px solid ${T.earth}` }} />
             <span>{r.earthFrac > 0 ? "Earth in view" : "Earth hidden"}</span>
             <span className="muted mono">{clearText(r.earthClear)} · az {fmtAz(sky.earthAz)}</span>
+            <span className="v3-next mono" style={{ color: T.earth }}>{r.earthNext}</span>
           </div>
         </div>
       )}

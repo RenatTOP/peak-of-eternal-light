@@ -198,6 +198,8 @@ export interface Series {
   earthAlt: Float32Array;
   earthAz: Float32Array;
   earthFrac: Float32Array;
+  sunR?: Float32Array; // disc angular radii, ° (present when the series comes from computeTrack)
+  earthR?: Float32Array;
 }
 
 /** Sun and Earth positions in the point's sky (no terrain): computed once; horizons
@@ -250,6 +252,7 @@ export function applyHorizon(k: SkyTrack, horizon: Horizon): Series {
   const s: Series = {
     t: k.t, stepMs: k.stepMs, sunAlt: k.sunAlt, sunAz: k.sunAz, earthAlt: k.earthAlt, earthAz: k.earthAz,
     sunFrac: new Float32Array(n), sunFracFlat: new Float32Array(n), earthFrac: new Float32Array(n),
+    sunR: k.sunR, earthR: k.earthR,
   };
   for (let i = 0; i < n; i++) {
     s.sunFrac[i] = discFraction(k.sunAlt[i] - horizon.at(k.sunAz[i]), k.sunR[i]);

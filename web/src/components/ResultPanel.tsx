@@ -1,7 +1,8 @@
 // 03 · RESULT: horizon with tracks, the sky at the cursor, windows with dates.
-import { useState } from "react";
+import { useMemo, useState, type CSSProperties } from "react";
 
 import type { Analysis, Horizon } from "../lib/astro";
+import { afterText, eventText, nextEvent, type Body, type BodyEvent } from "../lib/events";
 import { fmtDateTime, fmtDuration } from "../lib/format";
 import { T } from "../lib/theme";
 import { Head, Panel } from "./hud";
@@ -32,6 +33,10 @@ export function ResultPanel({ what, horizon, analysis, cursor, onCursor, onView3
   const earthClear = s.earthAlt[i] - horizon.at(s.earthAz[i]);
   const sunOn = s.sunFrac[i] > 0;
   const earthOn = s.earthFrac[i] > 0;
+  // on a route the horizon changes at every point, so the moment is only to step precision
+  const hz = what === "route" ? null : horizon;
+  const sunEvent = useMemo(() => nextEvent(s, i, "sun", hz), [s, i, hz]);
+  const earthEvent = useMemo(() => nextEvent(s, i, "earth", hz), [s, i, hz]);
   const wall = horizon.max;
   const active = analysis.windows[tab].length || tab !== "sunAndEarth" ? tab : "sun";
   const [, , what2, color] = TABS.find((t) => t[0] === active)!;
@@ -50,17 +55,13 @@ export function ResultPanel({ what, horizon, analysis, cursor, onCursor, onView3
                   : "terrain to 300 km · amber: Sun’s path, blue: Earth"}
       </div>
       <Skyline horizon={horizon} series={s} cursor={i} />
-      <div className="sky">
-        <div>
-          <span className="dot" style={sunOn ? { background: T.sun } : { border: `1.5px solid ${T.sun}` }} />
-          <span>{s.sunFrac[i] >= 0.999 ? "Sun in view" : sunOn ? `Sun ${Math.round(s.sunFrac[i] * 100)}% visible` : "Sun hidden"}</span>
-          <span className="muted">{sunClear >= 0 ? `${sunClear.toFixed(1)}° over terrain` : `${(-sunClear).toFixed(1)}° below the ridge`}</span>
-        </div>
-        <div>
-          <span className="dot" style={earthOn ? { background: T.earth } : { border: `1.5px solid ${T.earth}` }} />
-          <span>{earthOn ? "Earth in view" : "Earth hidden"}</span>
-          <span className="muted">{earthClear >= 0 ? `${earthClear.toFixed(1)}° over terrain` : `${(-earthClear).toFixed(1)}° below the ridge`}</span>
-        </div>
+      <div className="sky-now" aria-live="polite">
+        <SkyCard body="sun" color={T.sun} on={sunOn}
+                 state={s.sunFrac[i] >= 0.999 ? "Sun in view" : sunOn ? `Sun ${Math.round(s.sunFrac[i] * 100)}% visible` : "Sun hidden"}
+                 alt={s.sunAlt[i]} clear={sunClear} event={sunEvent} now={s.t[i]} />
+        <SkyCard body="earth" color={T.earth} on={earthOn}
+                 state={earthOn ? "Earth in view" : "Earth hidden"}
+                 alt={s.earthAlt[i]} clear={earthClear} event={earthEvent} now={s.t[i]} />
       </div>
       <div className="tabs" role="tablist">
         {TABS.map(([k, label]) => (
@@ -83,5 +84,42 @@ export function ResultPanel({ what, horizon, analysis, cursor, onCursor, onView3
         ))}
       </div>
     </Panel>
+  );
+}
+
+interface SkyCardProps {
+  body: Body;
+  color: string;
+  on: boolean;
+  state: string;
+  alt: number; // ° above the mathematical horizon (around the lunar sphere)
+  clear: number; // ° above terrain
+  event: BodyEvent;
+  now: number;
+}
+
+/** Body state at the cursor: elevation, clearance over terrain and time to the next set / rise. */
+function SkyCard({ body, color, on, state, alt, clear, event, now }: SkyCardProps) {
+  const name = body === "sun" ? "Sun" : "Earth";
+  // "Sunset in 47 d 5 h": don't break the countdown in the middle on a narrow screen
+  const [, lead = "", count = eventText(event, body, now)] = eventText(event, body, now).match(/^(.* in )(.+)$/) ?? [];
+  return (
+    <div className={`sky-card${on ? "" : " off"}`} style={{ "--c": color } as CSSProperties}>
+      <div className="state">
+        <span className="dot" style={on ? { background: color } : { border: `1.5px solid ${color}` }} />
+        {state}
+      </div>
+      <div className="elev" title={`${name} elevation above the lunar sphere's horizon`}>
+        <b className="mono">{alt >= 0 ? "" : "−"}{Math.abs(alt).toFixed(2)}°</b>
+        <span>elevation</span>
+      </div>
+      <div className="clear muted mono">
+        {clear >= 0 ? `${clear.toFixed(1)}° over terrain` : `${(-clear).toFixed(1)}° below the ridge`}
+      </div>
+      <div className="next" title={event.at === null ? "" : `${fmtDateTime(event.at)} UTC`}>
+        <b className="mono">{lead}<span style={{ whiteSpace: "nowrap" }}>{count}</span></b>
+        {event.at !== null && <span className="muted mono">{fmtDateTime(event.at).slice(5)} UTC · {afterText(event, body)}</span>}
+      </div>
+    </div>
   );
 }
