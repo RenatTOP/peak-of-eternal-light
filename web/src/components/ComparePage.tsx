@@ -8,8 +8,8 @@ import { T } from "../lib/theme";
 import { Bar, Head, Panel } from "./hud";
 import { fmtWh } from "./PowerCard";
 import type { LandingDay } from "../lib/landing";
-import { DateStrip } from "./DateStrip";
-import { MISSION_LENGTHS, missionLabel, VERDICT_MARK } from "./LandingCard";
+import { chartMax, LandingChart } from "./LandingChart";
+import { MISSION_LENGTHS, missionLabel } from "./LandingCard";
 
 export interface CompareRow {
   site: SiteInfo;
@@ -65,6 +65,11 @@ export function ComparePage({ rows, selectedId, onOpen, period, battery, craft, 
 }) {
   const [key, setKey] = useState<Key>("sun");
   const [strip, setStrip] = useState<"sun" | "landing">("landing");
+  // one scale for all places so they compare
+  const landingTop = useMemo(() => {
+    const all = Object.values(landing).flatMap((d) => d ?? []);
+    return all.length ? chartMax(all, missionDays) : missionDays;
+  }, [landing, missionDays]);
   const sorted = useMemo(() => [...rows].sort((a, b) => value(b, key, battery) - value(a, key, battery)),
                          [rows, key, battery]);
   const th = (k: Key | null, label: string, right = false) => (
@@ -83,7 +88,8 @@ export function ComparePage({ rows, selectedId, onOpen, period, battery, craft, 
         <Head num="01" label="COMPARE SITES" right={`${period} · battery for: ${craft} · click a row to open the site`} />
         {strip === "landing" && (
           <div className="clanding">
-            <span>Landing dates: can the {craft} survive a {missionLabel(missionDays)} mission if it lands that day?</span>
+            <span>Landing dates: how long the {craft} lasts on a {missionLabel(missionDays)} mission, by landing day
+              (scale 0–{+landingTop.toFixed(1)} d; white reaches the goal)</span>
             <div className="seg" role="group" aria-label="Mission length">
               {MISSION_LENGTHS.map(([d, l]) => (
                 <button key={l} className={Math.abs(d - missionDays) < 0.01 ? "on" : ""} onClick={() => onMissionDays(d)}>{l}</button>
@@ -117,9 +123,8 @@ export function ComparePage({ rows, selectedId, onOpen, period, battery, craft, 
                 <span className="cell r">{m.sunEarthPct.toFixed(0)}%</span>
                 {strip === "sun" ? <span><Strip a={r.analysis} /></span> : (
                   <span className="cstrip">
-                    <DateStrip days={landing[r.site.id]?.map((d) => ({ t: d.t, v: VERDICT_MARK[d.v], f: d.life })) ?? null} current={current}
-                               onPick={(t) => onOpenAt(r.site.id, t)} height={16} months={false}
-                               title={`Click a day to land at ${r.site.name} then`} />
+                    <LandingChart days={landing[r.site.id]} missionDays={missionDays} current={current} compact height={18}
+                                  yMaxDays={landingTop} onPick={(t) => onOpenAt(r.site.id, t)} />
                   </span>
                 )}
               </button>

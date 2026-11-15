@@ -14,7 +14,7 @@ export const MARK_STYLE: Record<DayMark, [string, number]> = {
 };
 
 interface Props {
-  days: { t: number; v: DayMark; f?: number }[] | null; // null = still computing; f = bar height 0..1
+  days: { t: number; v: DayMark }[] | null; // null = still computing
   current: number; // chosen day (amber tick)
   onPick: (t: number) => void;
   title: string;
@@ -46,9 +46,7 @@ export function DateStrip({ days, current, onPick, title, height = 34, months = 
       const [c, a] = MARK_STYLE[d.v];
       ctx.globalAlpha = a;
       ctx.fillStyle = c;
-      // bar height: how good the day is (for landing, the share of the mission the craft lives)
-      const hh = d.f === undefined ? bh : Math.max(1.5, d.f * bh);
-      ctx.fillRect(X(d.t), pad.t + bh - hh, Math.max(1, dw - 0.3), hh);
+      ctx.fillRect(X(d.t), pad.t, Math.max(1, dw - 0.3), bh);
     }
     ctx.globalAlpha = 1;
     ctx.font = `9.5px ${T.mono}`;
