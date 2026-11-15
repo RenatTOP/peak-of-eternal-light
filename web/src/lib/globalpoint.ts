@@ -3,6 +3,7 @@
 //  * near terrain to 100 km: LOLA 64 px/° (474 m);
 //  * far mountains 100–300 km: LOLA 16 px/° (1.9 km); curvature leaves only big ones visible from there.
 // Rays follow great circles from the point; each sample's angle is above the observer's local horizon.
+// Landing sites have precomputed horizons from 59 m SLDEM2015 (pipeline/landing_horizons.py) used instead.
 
 import { loadGz, loadJson, N_AZ, type Loader, type PointHorizon } from "./anypoint";
 import { Horizon, R_MOON_M } from "./astro";
@@ -17,6 +18,15 @@ export interface GdemLevel {
   tiles_y: number;
   rows: number; // how many tile rows exist (from the north)
   lat_min: number;
+}
+
+export interface LandingMeta {
+  format: number;
+  n_az: number;
+  height_m: number;
+  near_radius_m: number;
+  near_dem: string;
+  sites: { id: string; lat: number; lon: number; ground_z: number }[];
 }
 
 export interface GdemMeta {
@@ -178,14 +188,46 @@ export function globalHorizon(terrain: GlobalTerrain, lat: number, lon: number, 
 
 export class GlobalPoint {
   readonly terrain: GlobalTerrain;
+  readonly landing: LandingMeta | null;
+  private readonly load: Loader;
+  private readonly precise = new Map<string, Promise<Horizon | null>>();
 
-  constructor(terrain: GlobalTerrain) {
+  constructor(terrain: GlobalTerrain, landing: LandingMeta | null, load: Loader) {
     this.terrain = terrain;
+    this.landing = landing;
+    this.load = load;
   }
 
   static async load(load: Loader): Promise<GlobalPoint | null> {
-    const meta = await loadJson<GdemMeta>(load, "gdem/gdem.json");
-    return meta?.format === 1 ? new GlobalPoint(new GlobalTerrain(meta, load)) : null;
+    const [meta, landing] = await Promise.all([
+      loadJson<GdemMeta>(load, "gdem/gdem.json"),
+      loadJson<LandingMeta>(load, "landing/landing.json"),
+    ]);
+    return meta?.format === 1 ? new GlobalPoint(new GlobalTerrain(meta, load), landing?.format === 1 ? landing : null, load) : null;
+  }
+
+  /** Landing site with a precomputed horizon at (lat, lon), within ~10 m. */
+  landingAt(lat: number, lon: number) {
+    const tol = 3e-4;
+    return this.landing?.sites.find((s) => Math.abs(s.lat - lat) < tol
+      && Math.abs((((s.lon - lon) % 360) + 540) % 360 - 180) < tol / Math.max(0.1, Math.cos(lat * D2R))) ?? null;
+  }
+
+  private async preciseHorizon(lat: number, lon: number): Promise<PointHorizon | null> {
+    const site = this.landingAt(lat, lon);
+    const L = this.landing;
+    if (!site || !L) return null;
+    let p = this.precise.get(site.id);
+    if (!p) {
+      p = this.load(`landing/${site.id}.bin`).then((b) => (b && b.byteLength === 2 * L.n_az ? Horizon.fromInt16Centideg(b) : null));
+      this.precise.set(site.id, p);
+    }
+    const horizon = await p;
+    const g = this.terrain.meta;
+    return horizon && {
+      horizon, groundZ: site.ground_z, heightM: L.height_m, zone: "global", nearDem: L.near_dem,
+      nearRadiusM: L.near_radius_m, farSpacingM: (R_MOON_M * D2R) / g.levels.g16.ppd, precise: true,
+    };
   }
 
   /** Point within g64 terrain (further south the polar model applies). */
@@ -193,8 +235,13 @@ export class GlobalPoint {
     return lat - this.terrain.meta.near_radius_m / R_MOON_M / D2R > this.terrain.meta.levels.g64.lat_min;
   }
 
-  async horizon(lat: number, lon: number): Promise<PointHorizon | null> {
+  /** exact: use a landing site's precomputed 59 m horizon when there is one (the nearby scan wants 474 m everywhere). */
+  async horizon(lat: number, lon: number, exact = true): Promise<PointHorizon | null> {
     if (!this.covers(lat)) return null;
+    if (exact) {
+      const p = await this.preciseHorizon(lat, lon);
+      if (p) return p;
+    }
     const m = this.terrain.meta;
     await Promise.all([
       this.terrain.ensure("g64", lat, lon, m.near_radius_m),

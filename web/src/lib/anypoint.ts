@@ -55,6 +55,7 @@ export interface PointHorizon {
   nearDem: string; // "LOLA 80 m" / "LOLA 120 m"
   nearRadiusM: number;
   farSpacingM: number;
+  precise?: boolean; // precomputed landing-site horizon (59 m SLDEM2015)
 }
 
 // --------------------------------------------------------------------------- //

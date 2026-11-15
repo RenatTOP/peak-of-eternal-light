@@ -41,7 +41,7 @@ describe.skipIf(!haveTiles)("tile horizon = Python reference", async () => {
 
   for (const ref of refs) {
     it(ref.name, async () => {
-      const p = await gp.horizon(ref.lat, ref.lon);
+      const p = await gp.horizon(ref.lat, ref.lon, false);
       expect(p).not.toBeNull();
       expect(p!.groundZ).toBeCloseTo(ref.ground, 0);
       let worst = 0;
@@ -54,5 +54,33 @@ describe.skipIf(!haveTiles)("tile horizon = Python reference", async () => {
     expect(gp.covers(-59)).toBe(true);
     expect(gp.covers(-80)).toBe(false);
     expect(await gp.horizon(-85, 0)).toBeNull();
+  });
+});
+
+const haveLanding = haveTiles && existsSync(resolve(DATA, "landing/landing.json"));
+
+describe.skipIf(!haveLanding)("precomputed landing horizons (pipeline/landing_horizons.py)", async () => {
+  const gp = (await GlobalPoint.load(fsLoader))!;
+  const missions = JSON.parse(readFileSync(resolve(DATA, "missions.json"), "utf-8")).missions as
+    { id: string; where: { lat?: number; lon?: number; precision: string } }[];
+
+  it("one per landed mission off the pole, at its exact place", () => {
+    const want = missions.filter((m) => m.where.precision === "landed" && Math.abs(m.where.lat ?? 90) < 60).map((m) => m.id).sort();
+    expect(gp.landing!.sites.map((s) => s.id).sort()).toEqual(want);
+    for (const s of gp.landing!.sites) {
+      const m = missions.find((x) => x.id === s.id)!;
+      expect(s.lat).toBe(m.where.lat);
+      expect((((s.lon - m.where.lon!) % 360) + 360) % 360).toBeCloseTo(0, 9);
+    }
+  });
+
+  it("used at the landing site (any longitude convention), not a few hundred metres away or in the scan", async () => {
+    const s = gp.landing!.sites.find((x) => x.id === "blue-ghost-1")!;
+    const p = await gp.horizon(s.lat, s.lon + 360);
+    expect(p?.precise).toBe(true);
+    expect(p!.horizon.elev.length).toBe(1440);
+    expect(p!.groundZ).toBe(s.ground_z);
+    expect((await gp.horizon(s.lat + 0.01, s.lon))?.precise).toBeFalsy();
+    expect((await gp.horizon(s.lat, s.lon, false))?.precise).toBeFalsy();
   });
 });

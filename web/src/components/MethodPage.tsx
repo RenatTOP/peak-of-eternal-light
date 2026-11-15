@@ -50,7 +50,8 @@ export function MethodPage() {
             mountains come from a precomputed grid (2 km / 5 km spacing), corrected for the observer’s height.
             Anywhere else on the Moon the horizon is traced live along 720 great circles from the global LOLA map:
             474 m terrain to 100 km and 1.9 km terrain from 100 to 300 km, where the Moon’s curvature already hides
-            everything but large mountains.
+            everything but large mountains. Landing sites off the pole (Apollo, Chang’e, SLIM, Blue Ghost 1) use horizons
+            precomputed from 59 m SLDEM2015 terrain out to 40 km instead.
           </p>
         </Panel>
         <Panel>
@@ -58,7 +59,8 @@ export function MethodPage() {
           <ul>
             <li><b>Ephemerides</b>: NASA/JPL NAIF SPICE, DE440 planetary ephemeris and lunar orientation (MOON_ME), mid-1969 to 2035.</li>
             <li><b>Terrain</b>: LRO LOLA polar DEMs, 5 m at candidate sites, 20–240 m regional (Barker et al.);
-              the rest of the Moon from the LOLA global map at 64 pixels per degree (PDS GDR, 474 m).</li>
+              the rest of the Moon from the LOLA global map at 64 pixels per degree (PDS GDR, 474 m); landing sites
+              off the pole from SLDEM2015, LOLA merged with Kaguya terrain-camera data at 512 pixels per degree (59 m, Barker et al. 2016).</li>
             <li><b>Near-site detail</b>: shape-from-shading 5 m terrain and LROC NAC mosaics of Artemis III regions (Bertone et al.).</li>
             <li><b>Reference maps</b> (also used to route the sunnier path): average illumination, Earth visibility and permanent shadow to 65°S (Mazarico et al., Barker et al.).
               NASA publishes none beyond 65°S, so the 60–66°S band on the map is computed here with the same horizon model, over the same 18.6 years.</li>
@@ -93,10 +95,13 @@ export function MethodPage() {
           </p>
           <p>
             <b>Away from the pole</b>: the Sun’s elevation at the Apollo 11 and 12 touchdowns comes out at 10.70° and 5.14°,
-            against 10.65° and 5.19° in the Apollo Lunar Surface Journal. With the coarser 474 m terrain, sunset at the
-            Blue Ghost 1 site falls at 20:21 UTC on 16 March 2025; Firefly reported about five hours of night operations
-            before the lander went dark at 23:15 UTC, which puts the local sunset near 18:15. Expect timing errors of an
-            hour or two here, not minutes.
+            against 10.65° and 5.19° in the Apollo Lunar Surface Journal. At the Blue Ghost 1 site Firefly reported 346 hours
+            of daylight after the 08:34 UTC landing and just over five hours of night before the last data at 23:15 UTC on
+            16 March 2025, so daylight ended about 18:15–18:35. With the 59 m landing-site horizon the Sun starts to set at
+            18:42 and is gone at 19:48; on the 474 m map it would be 19:16 and 20:22. Across the seven landing sites whose
+            Sun sets within the mission window, the 59 m terrain moves sunset by −2 h to +9 min, mostly earlier: smoothed
+            terrain hides hills and crater rims. Elsewhere off the pole expect timing errors of an hour or two; the nearest few
+            hundred metres stay at the limit of even the 59 m map.
           </p>
           <p>
             <b>Any point on the map</b>: against full 5 m horizons, the live browser horizon differs by a median

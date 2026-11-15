@@ -328,13 +328,13 @@ export default function App() {
   const powerLazy = useDeferredValue(power);
 
   // --- comparison scenarios: point horizons in the background, then the same calculation as EXPLORE
-  const horizonOf = (p: Place): Promise<PointHorizon | null> => {
+  const horizonOf = (p: Place, exact = true): Promise<PointHorizon | null> => {
     if (p.kind !== "point" || !data) return Promise.resolve(null);
     if (p.lat <= -60) {
       const [x, y] = latLonToXY(p.lat, p.lon);
       return data.anyPoint ? data.anyPoint.horizon(x, y) : Promise.resolve(null);
     }
-    return data.globalPoint ? data.globalPoint.horizon(p.lat, p.lon) : Promise.resolve(null);
+    return data.globalPoint ? data.globalPoint.horizon(p.lat, p.lon, exact) : Promise.resolve(null);
   };
   useEffect(() => {
     if (!data) return;
@@ -796,7 +796,8 @@ export default function App() {
     setScan({ key, done: 0, total: spots.length, points: null, failed: false });
     const pts: ScanPoint[] = [];
     for (const sp of spots) {
-      const h = await horizonOf({ kind: "point", lat: sp.lat, lon: sp.lon }).catch(() => null);
+      // every spot, the centre too, on the same terrain: no precomputed landing horizon here
+      const h = await horizonOf({ kind: "point", lat: sp.lat, lon: sp.lon }, false).catch(() => null);
       if (scanToken.current !== token) return; // place changed or a new scan started
       if (h) {
         // slope from the same terrain as the horizon; its tiles are already loaded
@@ -867,9 +868,13 @@ export default function App() {
       left = (
         <SiteCard title={atLanding ? atLanding.name : "Selected point"} kind="Selected point" kindColor={T.text}
                   coords={`${fmtLat(picked.lat)} ${fmtLon(picked.lon)} · ${Math.round(p.groundZ)} m`}
-                  notice={`Computed for this exact spot from the global LOLA map: terrain within ${Math.round(p.nearRadiusM / 1000)} km ` +
-                    `at ${p.nearDem.replace("LOLA ", "")}, distant mountains to 300 km at ${(p.farSpacingM / 1000).toFixed(1)} km. ` +
-                    "Craters and ridges smaller than about a kilometre are not resolved, so sunrise and sunset can shift by an hour or two."}
+                  notice={p.precise
+                    ? `Landing site with a precomputed horizon: terrain within ${Math.round(p.nearRadiusM / 1000)} km from ${p.nearDem} ` +
+                      "(NASA LOLA + Kaguya), then the global LOLA map to 300 km. Hills and crater rims down to about 100 m are resolved, " +
+                      "so sunrise and sunset are closer than on the 474 m map; DATA & METHOD shows the check against Blue Ghost 1."
+                    : `Computed for this exact spot from the global LOLA map: terrain within ${Math.round(p.nearRadiusM / 1000)} km ` +
+                      `at ${p.nearDem.replace("LOLA ", "")}, distant mountains to 300 km at ${(p.farSpacingM / 1000).toFixed(1)} km. ` +
+                      "Craters and ridges smaller than about a kilometre are not resolved, so sunrise and sunset can shift by an hour or two."}
                   metrics={m} periodDays={days} listTitle="NEAREST LANDINGS"
                   list={nearLandings.filter((r) => r.m !== atLanding).slice(0, 4).map(({ m: x, d }) => ({
                     id: x.id, name: x.name, pct: NaN, extra: `${Math.round(d / 1000).toLocaleString("en-US")} km`, on: false,
