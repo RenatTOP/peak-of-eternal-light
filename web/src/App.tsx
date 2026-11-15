@@ -106,7 +106,8 @@ export default function App() {
   const [loaded, setLoaded] = useState<Set<LoadStep>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("explore");
-  const [stage, setStage] = useState<"globe" | "map" | "view">("globe");
+  const [stage, setStage] = useState<"globe" | "map" | "view" | "above">("globe");
+  const in3d = stage === "view" || stage === "above";
   // the map is created on first visit, then only hidden
   const [mapSeen, setMapSeen] = useState(false);
   if (stage === "map" && !mapSeen) setMapSeen(true);
@@ -418,7 +419,7 @@ export default function App() {
     setPicked(null);
     setRoute(null);
     setTab("explore");
-    setStage((s) => (s === "view" ? "view" : "map"));
+    setStage((s) => (s === "view" || s === "above" ? s : "map"));
   };
   const pickXY = (x: number, y: number) => {
     if (!data) return;
@@ -548,7 +549,7 @@ export default function App() {
       setRoute(null);
     }
     setTab(s.tab);
-    setStage(s.stage === "view" ? "view" : s.route || s.point ? "map" : s.stage);
+    setStage(s.stage === "view" || s.stage === "above" ? s.stage : s.route || s.point ? "map" : s.stage);
     pendingAt.current = s.at === null ? null : { t: s.at, what };
   };
   const applyRef = useRef(applyShare);
@@ -680,7 +681,8 @@ export default function App() {
   // 3D view: who is looking (place, point or rover at the cursor) and the same numbers as RESULT
   const viewTarget: ViewTarget | null = !view ? null
     : view.what === "route" && trav && roverPt
-      ? { kind: "route", name: "Rover", x: roverPt.x, y: roverPt.y, groundZ: trav.rh.ground[trav.run.idx[iNow]], route: trav.rh.pts }
+      ? { kind: "route", name: "Rover", x: roverPt.x, y: roverPt.y, groundZ: trav.rh.ground[trav.run.idx[iNow]],
+          route: mapRouteBase?.path ?? trav.rh.pts, waypoints: mapRouteBase?.anchors ?? route?.way }
     : view.what === "point" && picked?.point
       ? { kind: "point", name: "Selected point", x: picked.x, y: picked.y, groundZ: picked.point.groundZ }
     : view.what === "site" && selected
@@ -692,7 +694,8 @@ export default function App() {
     earthFrac: sNow.earthFrac[iNow], earthClear: sNow.earthAlt[iNow] - horizonNow.at(sNow.earthAz[iNow]),
   } : null;
   const can3d = !!viewTarget && !!data.anyPoint;
-  const open3d = can3d ? () => { setPlaying(false); setStage("view"); } : null;
+  // a route reads best from above first, a place from the ground
+  const open3d = can3d ? (m?: "view" | "above") => { setPlaying(false); setStage(m ?? (viewTarget?.kind === "route" ? "above" : "view")); } : null;
 
   return (
     <div className="app">
@@ -732,10 +735,10 @@ export default function App() {
                         picked={picked && { x: picked.x, y: picked.y }}
                         pickedTag={picked ? { title: "SELECTED POINT", line: `${fmtLat(picked.lat)} ${fmtLon(picked.lon)}` } : null}
                         pickedLink={picked?.status === "ok" && nearest[0] ? { x: nearest[0].s.x, y: nearest[0].s.y } : null}
-                        missions={missionsList} route={mapRoute} onRoute={onRoute} onView3D={route?.drawing ? null : open3d} />
+                        missions={missionsList} route={mapRoute} onRoute={onRoute} onView3D={route?.drawing || !open3d ? null : () => open3d()} />
             </div>
           )}
-          {stage === "view" && (
+          {in3d && (
             <div className="stage-layer">
               {viewTarget && data.anyPoint ? (
                 <ErrorBoundary fallback={() => (
@@ -752,7 +755,8 @@ export default function App() {
                 )}>
                   <Suspense fallback={null}>
                     <SiteView3D ephem={data.ephem} anyPoint={data.anyPoint} target={viewTarget} t={clock ?? start}
-                                readout={readout} landmarks={landmarks} onClose={() => setStage("map")} />
+                                readout={readout} landmarks={landmarks} onClose={() => setStage("map")}
+                                mode={stage === "above" ? "above" : "eye"} onMode={(m) => setStage(m === "above" ? "above" : "view")} />
                   </Suspense>
                 </ErrorBoundary>
               ) : !card && (
@@ -773,7 +777,7 @@ export default function App() {
         </div>
         {view && horizonNow && <ResultPanel what={view.what} horizon={horizonNow} analysis={view.analysis} cursor={cursor}
                               onCursor={(i) => { setPlaying(false); setCursor(i); }}
-                              onView3D={stage === "view" ? null : open3d} />}
+                              onView3D={in3d || !open3d ? null : () => open3d(view.what === "route" ? "above" : "view")} />}
         {tab === "explore" && timebar}
       </main>
       {tab === "compare" && (

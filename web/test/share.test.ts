@@ -39,6 +39,9 @@ describe("share link", () => {
     expect(h).toContain("view=3d");
     expect(decodeShare(h).stage).toBe("view");
     expect(decodeShare("#view=vr").stage).toBeUndefined();
+    const up = encodeShare({ ...SHARE_DEFAULTS, stage: "above" });
+    expect(up).toBe("view=above");
+    expect(decodeShare(up).stage).toBe("above");
   });
 
   it("ignores junk instead of breaking", () => {

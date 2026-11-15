@@ -3,6 +3,9 @@
 // puts them, and real stars. Time follows the timeline cursor; what you see here is what the panels count.
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
+import { Line2 } from "three/examples/jsm/lines/Line2.js";
+import { LineGeometry } from "three/examples/jsm/lines/LineGeometry.js";
+import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
 
 import type { AnyPoint } from "../lib/anypoint";
 import { siteVector, xyToLatLon, type Ephem, type Vec3 } from "../lib/astro";
@@ -20,8 +23,17 @@ export interface ViewTarget {
   x: number; // map point, m
   y: number;
   groundZ: number; // surface height above the sphere, m
-  route?: { x: number; y: number }[]; // rover path (map points)
+  route?: RoutePt[]; // rover path (map points) and how the rover drove it
+  waypoints?: [number, number][]; // user route vertices
 }
+
+export interface RoutePt {
+  x: number;
+  y: number;
+  state?: "lit" | "dark" | "ahead";
+}
+
+export type ViewMode = "eye" | "above";
 
 export interface ViewReadout {
   sunFrac: number;
@@ -45,6 +57,8 @@ interface Props {
   t: number;
   readout: ViewReadout | null;
   landmarks: Landmark[];
+  mode: ViewMode;
+  onMode: (m: ViewMode) => void;
   onClose: () => void;
 }
 
@@ -85,7 +99,7 @@ vec3 tonemap(float I, float exposure) {
 const TERRAIN_FS = /* glsl */ `
 uniform highp sampler2D uH;
 uniform highp sampler2D uFar;
-uniform float uSize, uStep, uHalf, uMaxU, uK, uNodeHalf, uSunR, uExposure, uGrow;
+uniform float uSize, uStep, uHalf, uMaxU, uK, uNodeHalf, uSunR, uExposure, uGrow, uAmbient;
 uniform vec3 uSun, uCam;
 varying vec3 vP;
 ${COMMON_GLSL}
@@ -174,7 +188,7 @@ void main() {
   // sub-pixel roughness (as in Hapke): part of the surface is lit even when the
   // mean slope faces slightly away, so the terminator is soft, not black and white
   float mu0 = 0.5 * (dot(N, uSun) + sqrt(dot(N, uSun) * dot(N, uSun) + 0.0016));
-  float I = albedo * 0.006; // light reflected from sunlit slopes around
+  float I = albedo * uAmbient; // light reflected from sunlit slopes around
   if (mu0 > 0.002) {
     vec3 up = normalize(vec3(P.xy, P.z + R_MOON));
     float vis = min(farLight(P, up), 1.0);
@@ -220,6 +234,22 @@ void main() {
   float crest = exp(-max(below, 0.0) / max(0.25, 0.4 * sunEl + 0.25));
   float I = 0.11 * (0.5 * mu0 + mu0 / (mu0 + 0.3)) * crest * phaseLaw(uSun, -d) + 0.0012;
   gl_FragColor = vec4(tonemap(I, uExposure), 1.0);
+}`;
+
+// diorama walls (view from above): dark sides from the terrain edge down
+const SKIRT_VS = /* glsl */ `
+attribute float aTop;
+varying float vTop;
+void main() {
+  vTop = aTop;
+  gl_Position = projectionMatrix * (modelViewMatrix * vec4(position, 1.0));
+}`;
+
+const SKIRT_FS = /* glsl */ `
+varying float vTop;
+void main() {
+  vec3 c = mix(vec3(0.012, 0.03, 0.05), vec3(0.04, 0.09, 0.13), vTop);
+  gl_FragColor = vec4(c + vec3(0.3, 0.5, 0.6) * smoothstep(0.985, 1.0, vTop) * 0.5, 1.0);
 }`;
 
 const STAR_VS = /* glsl */ `
@@ -323,7 +353,17 @@ interface Look {
   fov: number; // vertical field of view, °
 }
 
-type Status = { kind: "loading"; frac: number; what: string } | { kind: "ready" } | { kind: "failed"; msg: string };
+interface Orbit {
+  yaw: number; // camera heading, azimuth from the patch's north, °
+  pitch: number; // angle above the horizon, °
+  dist: number; // camera to the look-at point, m
+  e: number; // look-at point in the patch frame, m
+  n: number;
+}
+
+const ABOVE_FOV = 45;
+
+type Status ={ kind: "loading"; frac: number; what: string } | { kind: "ready" } | { kind: "failed"; msg: string };
 
 function lite(): boolean {
   return window.matchMedia("(max-width: 960px), (pointer: coarse)").matches;
@@ -333,7 +373,7 @@ function fmtAz(a: number): string {
   return `${Math.round(((a % 360) + 360) % 360)}°`;
 }
 
-export default function SiteView3D({ ephem, anyPoint, target, t, readout, landmarks, onClose }: Props) {
+export default function SiteView3D({ ephem, anyPoint, target, t, readout, landmarks, mode, onMode, onClose }: Props) {
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const overlay = useRef<HTMLCanvasElement>(null);
@@ -343,6 +383,11 @@ export default function SiteView3D({ ephem, anyPoint, target, t, readout, landma
   lookRef.current = look;
   const [region, setRegion] = useState<Region | null>(null);
   const [sky, setSky] = useState<{ sunAz: number; sunEl: number; earthAz: number; earthEl: number } | null>(null);
+  const [orbit, setOrbit] = useState<Orbit>({ yaw: 0, pitch: 38, dist: 9000, e: 0, n: 0 });
+  const orbitRef = useRef(orbit);
+  orbitRef.current = orbit;
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
   const eng = useRef<Engine | null>(null);
   const aimed = useRef(false);
 
@@ -391,8 +436,13 @@ export default function SiteView3D({ ephem, anyPoint, target, t, readout, landma
   }, [here, lat, lon, target.groundZ, target.x, target.y, anyPoint]);
 
   useEffect(() => {
-    eng.current?.setRoute(here && target.route ? target.route : null);
-  }, [here, target.route]);
+    eng.current?.setRoute(here && target.route ? target.route : null, target.waypoints ?? null);
+  }, [here, target.route, target.waypoints]);
+
+  const obsLabel = target.kind === "route" ? "ROVER" : target.name.toUpperCase();
+  useEffect(() => {
+    eng.current?.setMode(mode, obsLabel);
+  }, [mode, obsLabel, here]);
 
   useEffect(() => {
     eng.current?.setLandmarks(landmarks);
@@ -420,14 +470,40 @@ export default function SiteView3D({ ephem, anyPoint, target, t, readout, landma
     eng.current?.setLook(look);
   }, [look, region]);
 
+  // from above: frame the whole route (or place) with the Sun from the side, where relief reads best
+  const fitted = useRef("");
+  const fit = () => {
+    const box = eng.current?.fitBox();
+    if (!box || !sky) return;
+    // route fully in frame; place or point with ~10 km around it
+    const dist = Math.min(90_000, box.ext > 0 ? Math.max(4000, box.ext * 1.5 + 3000) : 14_000);
+    setOrbit({ yaw: sky.sunAz + 90, pitch: 38, dist, e: box.e, n: box.n });
+  };
+  useEffect(() => {
+    if (mode !== "above" || !here || !sky || fitted.current === `${who}|${ckey}`) return;
+    fitted.current = `${who}|${ckey}`;
+    fit();
+  }, [mode, here, sky, who, ckey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    eng.current?.setOrbit(orbit);
+  }, [orbit, region]);
+
   // --- controls: drag to look around, wheel / pinch to zoom
   useEffect(() => {
     const cv = overlay.current!;
     const pts = new Map<number, [number, number]>();
     let pinch = 0;
+    let panning = false;
+    const centroid = () => {
+      const v = [...pts.values()];
+      return [v.reduce((s, p) => s + p[0], 0) / v.length, v.reduce((s, p) => s + p[1], 0) / v.length];
+    };
     const down = (e: PointerEvent) => {
       cv.setPointerCapture(e.pointerId);
       pts.set(e.pointerId, [e.clientX, e.clientY]);
+      // from above: right button or Shift pans instead of rotating
+      panning = e.button === 2 || e.shiftKey;
       if (pts.size === 2) {
         const [a, b] = [...pts.values()];
         pinch = Math.hypot(a[0] - b[0], a[1] - b[1]);
@@ -436,7 +512,25 @@ export default function SiteView3D({ ephem, anyPoint, target, t, readout, landma
     const move = (e: PointerEvent) => {
       const prev = pts.get(e.pointerId);
       if (!prev) return;
+      const c0 = centroid();
       pts.set(e.pointerId, [e.clientX, e.clientY]);
+      const c1 = centroid();
+      if (modeRef.current === "above") {
+        const O = orbitRef.current;
+        if (pts.size === 2) {
+          // two fingers: pinch zooms, moving pans
+          const [a, b] = [...pts.values()];
+          const d = Math.hypot(a[0] - b[0], a[1] - b[1]);
+          const next = pan(O, c1[0] - c0[0], c1[1] - c0[1], cv.clientHeight);
+          setOrbit({ ...next, dist: pinch > 0 ? clampDist(O.dist * (pinch / d)) : O.dist });
+          pinch = d;
+          return;
+        }
+        const dx = e.clientX - prev[0], dy = e.clientY - prev[1];
+        if (panning) setOrbit(pan(O, dx, dy, cv.clientHeight));
+        else setOrbit({ ...O, yaw: O.yaw - dx * 0.3, pitch: clampOrbitPitch(O.pitch + dy * 0.25) });
+        return;
+      }
       const L = lookRef.current;
       if (pts.size === 2) {
         const [a, b] = [...pts.values()];
@@ -454,15 +548,23 @@ export default function SiteView3D({ ephem, anyPoint, target, t, readout, landma
     };
     const wheel = (e: WheelEvent) => {
       e.preventDefault();
+      if (modeRef.current === "above") {
+        const O = orbitRef.current;
+        setOrbit({ ...O, dist: clampDist(O.dist * Math.exp(e.deltaY * 0.0012)) });
+        return;
+      }
       const L = lookRef.current;
       setLook({ ...L, fov: clampFov(L.fov * Math.exp(e.deltaY * 0.0012)) });
     };
+    const menu = (e: Event) => e.preventDefault();
+    cv.addEventListener("contextmenu", menu);
     cv.addEventListener("pointerdown", down);
     cv.addEventListener("pointermove", move);
     cv.addEventListener("pointerup", up);
     cv.addEventListener("pointercancel", up);
     cv.addEventListener("wheel", wheel, { passive: false });
     return () => {
+      cv.removeEventListener("contextmenu", menu);
       cv.removeEventListener("pointerdown", down);
       cv.removeEventListener("pointermove", move);
       cv.removeEventListener("pointerup", up);
@@ -495,7 +597,21 @@ export default function SiteView3D({ ephem, anyPoint, target, t, readout, landma
   const onKey = (e: React.KeyboardEvent) => {
     const L = lookRef.current;
     const k = L.fov / 12;
-    const map: Record<string, () => void> = {
+    const O = orbitRef.current;
+    const h = overlay.current?.clientHeight ?? 500;
+    const map: Record<string, () => void> = mode === "above" ? {
+      ArrowLeft: () => setOrbit(e.shiftKey ? pan(O, 40, 0, h) : { ...O, yaw: O.yaw - 10 }),
+      ArrowRight: () => setOrbit(e.shiftKey ? pan(O, -40, 0, h) : { ...O, yaw: O.yaw + 10 }),
+      ArrowUp: () => setOrbit(e.shiftKey ? pan(O, 0, 40, h) : { ...O, pitch: clampOrbitPitch(O.pitch + 5) }),
+      ArrowDown: () => setOrbit(e.shiftKey ? pan(O, 0, -40, h) : { ...O, pitch: clampOrbitPitch(O.pitch - 5) }),
+      "+": () => setOrbit({ ...O, dist: clampDist(O.dist / 1.25) }),
+      "=": () => setOrbit({ ...O, dist: clampDist(O.dist / 1.25) }),
+      "-": () => setOrbit({ ...O, dist: clampDist(O.dist * 1.25) }),
+      f: fit,
+      v: () => onMode("eye"),
+      Escape: onClose,
+    } : {
+      v: () => onMode("above"),
       ArrowLeft: () => setLook({ ...L, yaw: L.yaw - k }),
       ArrowRight: () => setLook({ ...L, yaw: L.yaw + k }),
       ArrowUp: () => setLook({ ...L, pitch: clampPitch(L.pitch + k) }),
@@ -515,25 +631,39 @@ export default function SiteView3D({ ephem, anyPoint, target, t, readout, landma
   };
 
   const loading = status.kind === "loading";
+  const above = mode === "above";
   const r = readout;
   return (
     <div ref={wrap} className="view3d">
       <canvas ref={canvas} className="view3d-gl" />
       <canvas ref={overlay} className="view3d-hud" tabIndex={0} onKeyDown={onKey} role="img"
-              aria-label={`View from ${target.name}, looking ${fmtAz(look.yaw)}. Drag to look around, arrow keys to turn, plus and minus to zoom, S and E to face the Sun or Earth.`} />
+              aria-label={above
+                ? `Terrain around ${target.kind === "route" ? "the route" : target.name} seen from above. Drag to orbit, right-drag or Shift to pan, scroll to zoom, F to fit, V for the view from the ground.`
+                : `View from ${target.name}, looking ${fmtAz(look.yaw)}. Drag to look around, arrow keys to turn, plus and minus to zoom, S and E to face the Sun or Earth, V for the view from above.`} />
       <Brackets />
       <div className="v3-title">
-        <b>{target.kind === "route" ? "FROM THE ROVER" : `FROM ${target.name.toUpperCase()}`}</b>
-        <span className="mono">{fmtLat(lat)} {fmtLon(lon)} · {Math.round(target.groundZ)} m · eye {EYE_M} m</span>
+        <b>{above ? (target.kind === "route" ? "ABOVE THE ROUTE" : `ABOVE ${target.name.toUpperCase()}`)
+                  : target.kind === "route" ? "FROM THE ROVER" : `FROM ${target.name.toUpperCase()}`}</b>
+        <span className="mono">{fmtLat(lat)} {fmtLon(lon)} · {Math.round(target.groundZ)} m{above ? "" : ` · eye ${EYE_M} m`}</span>
         <span className="mono muted">{fmtDateTime(t)} UTC</span>
       </div>
       <div className="v3-tools">
-        <button className="tool" onClick={lookSun} disabled={!sky}>
-          <i className="v3-dot" style={{ background: T.sun }} />Sun
-        </button>
-        <button className="tool" onClick={lookEarth} disabled={!sky}>
-          <i className="v3-dot" style={{ background: T.earth }} />Earth
-        </button>
+        <div className="seg v3-mode" role="group" aria-label="Camera">
+          <button className={above ? "" : "on"} aria-pressed={!above} onClick={() => onMode("eye")}>Ground</button>
+          <button className={above ? "on" : ""} aria-pressed={above} onClick={() => onMode("above")}>Above</button>
+        </div>
+        {above ? (
+          <button className="tool" onClick={fit} disabled={!sky} title="Show the whole route (or place) again">Fit</button>
+        ) : (
+          <>
+            <button className="tool" onClick={lookSun} disabled={!sky}>
+              <i className="v3-dot" style={{ background: T.sun }} />Sun
+            </button>
+            <button className="tool" onClick={lookEarth} disabled={!sky}>
+              <i className="v3-dot" style={{ background: T.earth }} />Earth
+            </button>
+          </>
+        )}
         <button className="tool" onClick={onClose}>Map</button>
       </div>
       {r && sky && (
@@ -551,7 +681,8 @@ export default function SiteView3D({ ephem, anyPoint, target, t, readout, landma
         </div>
       )}
       <div className="v3-foot mono">
-        <span>{Math.round(look.fov)}° field · drag to look, scroll to zoom</span>
+        <span>{above ? `${(orbit.dist / 1000).toFixed(1)} km away · drag to orbit, right-drag to pan, scroll to zoom`
+                     : `${Math.round(look.fov)}° field · drag to look, scroll to zoom`}</span>
         <span className="muted">Terrain: LOLA {region ? `${region.hm.step} m` : ""} to {Math.round(spec.half / 1000)} km, distant mountains from the horizon profile. True vertical scale.</span>
       </div>
       {loading && (
@@ -581,6 +712,17 @@ function clearText(c: number): string {
 
 const clampPitch = (p: number) => Math.min(85, Math.max(-80, p));
 const clampFov = (f: number) => Math.min(100, Math.max(2, f));
+const clampOrbitPitch = (p: number) => Math.min(89, Math.max(6, p));
+const clampDist = (d: number) => Math.min(120_000, Math.max(300, d));
+
+/** Pan the look-at point: the ground follows the finger. Scale = frame width at the look-at distance. */
+function pan(O: Orbit, dx: number, dy: number, heightPx: number): Orbit {
+  const k = (2 * O.dist * Math.tan((ABOVE_FOV * DEG) / 2)) / heightPx;
+  const sy = Math.sin(O.yaw * DEG), cy = Math.cos(O.yaw * DEG);
+  // right of the view direction is (cos, −sin); forward is (sin, cos); forward is foreshortened by pitch
+  const fwd = (dy * k) / Math.max(Math.sin(O.pitch * DEG), 0.3);
+  return { ...O, e: O.e - dx * k * cy + fwd * sy, n: O.n + dx * k * sy + fwd * cy };
+}
 
 function regionCentre(target: ViewTarget, current: Region | null, half: number): [number, number] {
   if (target.kind !== "route" || !target.route?.length) return [target.x, target.y];
@@ -613,7 +755,16 @@ class Engine {
   private terrain: THREE.Mesh[] = [];
   private ring: THREE.Mesh | null = null;
   private ringMat: THREE.ShaderMaterial;
-  private routeLine: THREE.Line | null = null;
+  private route: Line2[] = [];
+  private routeLocal: Vec3[] = []; // path points in the patch frame, for "show the whole route"
+  private waypoints: Vec3[] = [];
+  private skirt: THREE.Mesh | null = null;
+  private mode: ViewMode = "eye";
+  private orbit: Orbit = { yaw: 0, pitch: 38, dist: 9000, e: 0, n: 0 };
+  private camLocal: Vec3 = [0, 0, 0];
+  private obsLabel = "";
+  private sunFrac = 0;
+  private allMarks: { name: string; p: Vec3 }[] = [];
   private region: Region | null = null;
   private obs: { lat: number; lon: number; eye: Vec3; basis: [Vec3, Vec3, Vec3]; groundZ: number } | null = null;
   private look: Look = { yaw: 0, pitch: 0, fov: 60 };
@@ -684,6 +835,7 @@ class Engine {
     this.overlay.height = Math.round(h * (window.devicePixelRatio || 1));
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+    for (const l of this.route) (l.material as LineMaterial).resolution.set(w, h);
     this.invalidate();
   }
 
@@ -787,7 +939,7 @@ class Engine {
       uniforms: {
         uH: { value: hTex }, uFar: { value: fTex }, uSize: { value: S }, uStep: { value: hm.step }, uHalf: { value: hm.half },
         uMaxU: { value: maxU + 1 }, uK: { value: r.K }, uNodeHalf: { value: r.nodeHalf }, uSunR: { value: 0.0046 },
-        uExposure: { value: 16 }, uGrow: { value: Math.pow(reach / (hm.step * 0.75), 1 / this.steps) },
+        uExposure: { value: 16 }, uGrow: { value: Math.pow(reach / (hm.step * 0.75), 1 / this.steps) }, uAmbient: { value: 0.006 },
         uSun: { value: new THREE.Vector3(0, 0, 1) }, uCam: { value: new THREE.Vector3() },
       },
     });
@@ -796,7 +948,50 @@ class Engine {
     mesh.frustumCulled = false;
     this.terrain = [mesh];
     this.scene.add(mesh);
+    this.buildSkirt(r);
     this.invalidate();
+  }
+
+  // diorama walls: four sides from the terrain edge to a common floor
+  private buildSkirt(r: Region) {
+    if (this.skirt) {
+      this.skirt.geometry.dispose();
+      (this.skirt.material as THREE.Material).dispose();
+      this.scene.remove(this.skirt);
+    }
+    const { hm } = r;
+    const S = hm.size;
+    let minU = Infinity;
+    for (const u of hm.u) minU = Math.min(minU, u);
+    const base = minU - 600;
+    const pos: number[] = [];
+    const top: number[] = [];
+    const idx: number[] = [];
+    const sides: ((k: number) => [number, number])[] = [
+      (k) => [k, 0], (k) => [S - 1, k], (k) => [S - 1 - k, S - 1], (k) => [0, S - 1 - k],
+    ];
+    for (const side of sides) {
+      const v0 = pos.length / 3;
+      for (let k = 0; k < S; k++) {
+        const [i, j] = side(k);
+        const e = -hm.half + i * hm.step, n = -hm.half + j * hm.step;
+        pos.push(...v3([e, n, hm.u[j * S + i]]).toArray(), ...v3([e, n, base]).toArray());
+        top.push(1, 0);
+        if (k > 0) {
+          const a = v0 + 2 * (k - 1);
+          idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+        }
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute("aTop", new THREE.Float32BufferAttribute(top, 1));
+    g.setIndex(idx);
+    this.skirt = new THREE.Mesh(g, new THREE.ShaderMaterial({ vertexShader: SKIRT_VS, fragmentShader: SKIRT_FS, side: THREE.DoubleSide }));
+    this.skirt.frustumCulled = false;
+    this.skirt.renderOrder = 2;
+    this.skirt.visible = this.mode === "above";
+    this.scene.add(this.skirt);
   }
 
   setObserver(lat: number, lon: number, groundZ: number) {
@@ -857,38 +1052,72 @@ class Engine {
     this.ring = new THREE.Mesh(g, this.ringMat);
     this.ring.frustumCulled = false;
     this.ring.renderOrder = 2;
+    this.ring.visible = this.mode !== "above";
     this.scene.add(this.ring);
     this.invalidate();
   }
 
-  setRoute(pts: { x: number; y: number }[] | null) {
-    if (this.routeLine) {
-      this.routeLine.geometry.dispose();
-      (this.routeLine.material as THREE.Material).dispose();
-      this.scene.remove(this.routeLine);
-      this.routeLine = null;
+  /** Rover path coloured as on the map: sunlit / in shadow / still ahead. */
+  setRoute(pts: RoutePt[] | null, waypoints: [number, number][] | null) {
+    for (const l of this.route) {
+      l.geometry.dispose();
+      (l.material as THREE.Material).dispose();
+      this.scene.remove(l);
     }
+    this.route = [];
+    this.routeLocal = [];
+    this.waypoints = [];
     const r = this.region;
-    if (!r || !pts || pts.length < 2) return;
-    const out: number[] = [];
+    if (!r || !pts || pts.length < 2) {
+      this.invalidate();
+      return;
+    }
+    const local = (x: number, y: number): Vec3 | null => {
+      const [la, lo] = xyToLatLon(x, y);
+      const l = toLocal(r.frame, siteVector(la, lo, 0));
+      if (Math.abs(l[0]) > r.hm.half || Math.abs(l[1]) > r.hm.half) return null;
+      return [l[0], l[1], heightAt(r.hm, l[0], l[1])];
+    };
+    const COL = { lit: new THREE.Color(T.sun), dark: new THREE.Color(T.night), ahead: new THREE.Color(T.text).multiplyScalar(0.55) };
+    const pos: number[] = [];
+    const col: number[] = [];
     for (let k = 0; k < pts.length - 1; k++) {
       // small steps so the line lies on the terrain
       const a = pts[k], b = pts[k + 1];
+      const c = COL[a.state ?? "ahead"];
       const m = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 40));
-      for (let s = 0; s < m; s++) {
-        const x = a.x + ((b.x - a.x) * s) / m, y = a.y + ((b.y - a.y) * s) / m;
-        const [la, lo] = xyToLatLon(x, y);
-        const l = toLocal(r.frame, siteVector(la, lo, 0));
-        if (Math.abs(l[0]) > r.hm.half || Math.abs(l[1]) > r.hm.half) continue;
-        out.push(...v3([l[0], l[1], heightAt(r.hm, l[0], l[1]) + 1.2]).toArray());
+      for (let s = 0; s <= m; s++) {
+        if (s === m && k < pts.length - 2) break;
+        const l = local(a.x + ((b.x - a.x) * s) / m, a.y + ((b.y - a.y) * s) / m);
+        if (!l) continue;
+        this.routeLocal.push(l);
+        pos.push(...v3([l[0], l[1], l[2] + 1.2]).toArray());
+        col.push(c.r, c.g, c.b);
       }
     }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute("position", new THREE.Float32BufferAttribute(out, 3));
-    this.routeLine = new THREE.Line(g, new THREE.LineBasicMaterial({ color: T.both, transparent: true, opacity: 0.75 }));
-    this.routeLine.renderOrder = 3;
-    this.routeLine.frustumCulled = false;
-    this.scene.add(this.routeLine);
+    if (pos.length < 6) return;
+    this.waypoints = (waypoints ?? []).map(([x, y]) => local(x, y)).filter((v): v is Vec3 => !!v);
+    const geo = new LineGeometry();
+    geo.setPositions(pos);
+    geo.setColors(col);
+    const size = new THREE.Vector2();
+    this.renderer.getSize(size);
+    const mk = (o: ConstructorParameters<typeof LineMaterial>[0], order: number) => {
+      const m = new LineMaterial(o);
+      m.resolution.copy(size);
+      const l = new Line2(geo, m);
+      l.renderOrder = order;
+      l.frustumCulled = false;
+      this.scene.add(l);
+      return l;
+    };
+    this.route = [
+      mk({ color: 0x03070d, linewidth: 6 }, 3), // dark outline (opaque: drawn before the colour)
+      mk({ vertexColors: true, linewidth: 3 }, 4),
+      // from above: the part of the path behind a hill, faint through the terrain
+      mk({ vertexColors: true, linewidth: 2, transparent: true, opacity: 0.28, depthTest: false, depthWrite: false }, 5),
+    ];
+    this.applyMode();
     this.invalidate();
   }
 
@@ -902,6 +1131,7 @@ class Engine {
   private updateMarks() {
     const r = this.region, o = this.obs;
     this.marks = [];
+    this.allMarks = [];
     if (!r || !o) return;
     for (const lm of this.landmarks) {
       const [la, lo] = xyToLatLon(lm.x, lm.y);
@@ -909,6 +1139,7 @@ class Engine {
       if (Math.abs(l[0]) > r.hm.half || Math.abs(l[1]) > r.hm.half) continue;
       const p: Vec3 = [l[0], l[1], Math.max(heightAt(r.hm, l[0], l[1]), sphereU(l[0], l[1], lm.groundZ)) + 3];
       const km = Math.hypot(p[0] - o.eye[0], p[1] - o.eye[1]) / 1000;
+      if (km >= 0.2) this.allMarks.push({ name: lm.name, p });
       if (km < 0.2 || !lineOfSight(r.hm, o.eye, p)) continue;
       this.marks.push({ name: lm.name, p, km });
     }
@@ -917,6 +1148,7 @@ class Engine {
   /** Sun, Earth and stars at time t. Returns the bodies' azimuth and elevation for the observer. */
   setTime(ephem: Ephem, t: number, sunFrac: number, earthFrac: number) {
     this.seen = { sun: sunFrac > 0, earth: earthFrac > 0 };
+    this.sunFrac = sunFrac;
     const r = this.region, o = this.obs;
     if (!r || !o) return null;
     const obsKm = siteVector(o.lat, o.lon, o.groundZ + EYE_M);
@@ -932,7 +1164,6 @@ class Engine {
     this.sunMat.uniforms.uSpan.value = span;
     this.glare.position.copy(sun.clone().multiplyScalar(1000));
     this.glare.scale.setScalar(1000 * Math.tan(30 * DEG));
-    this.glareMat.uniforms.uK.value = sunFrac;
     this.earth.position.copy(earth.clone().multiplyScalar(1000));
     this.earth.scale.setScalar(1000 * Math.sin(s.earthRadius));
     if (this.terrainMat) {
@@ -972,6 +1203,43 @@ class Engine {
     this.invalidate();
   }
 
+  setOrbit(o: Orbit) {
+    this.orbit = o;
+    this.invalidate();
+  }
+
+  setMode(m: ViewMode, label: string) {
+    this.mode = m;
+    this.obsLabel = label;
+    this.applyMode();
+  }
+
+  // what each mode shows: far silhouette only from the eye, walls and "path through the hill" only from above
+  private applyMode() {
+    const above = this.mode === "above";
+    if (this.ring) this.ring.visible = !above;
+    if (this.skirt) this.skirt.visible = above;
+    if (this.route.length === 3) {
+      (this.route[0].material as LineMaterial).linewidth = above ? 6 : 4.5;
+      (this.route[1].material as LineMaterial).linewidth = above ? 3 : 2.5;
+      this.route[2].visible = above;
+    }
+    this.invalidate();
+  }
+
+  /** Centre and extent to show from above: the route, or else the observer point. */
+  fitBox(): { e: number; n: number; ext: number } | null {
+    const pts = this.routeLocal.length ? this.routeLocal : this.obs ? [this.obs.eye] : [];
+    if (!pts.length) return null;
+    const es = pts.map((p) => p[0]), ns = pts.map((p) => p[1]);
+    const [e0, e1, n0, n1] = [Math.min(...es), Math.max(...es), Math.min(...ns), Math.max(...ns)];
+    return { e: (e0 + e1) / 2, n: (n0 + n1) / 2, ext: Math.max(e1 - e0, n1 - n0) };
+  }
+
+  get half(): number {
+    return this.region?.hm.half ?? 30_000;
+  }
+
   private dirOf(az: number, el: number): Vec3 {
     const [be, bn, bu] = this.obs!.basis;
     const ce = Math.cos(el * DEG), se = Math.sin(el * DEG), sa = Math.sin(az * DEG), ca = Math.cos(az * DEG);
@@ -993,20 +1261,160 @@ class Engine {
       this.renderer.render(new THREE.Scene(), cam);
       return;
     }
-    const eye = v3(o.eye);
-    cam.position.copy(eye);
-    cam.up.copy(v3(o.basis[2]));
-    cam.fov = this.look.fov;
-    cam.updateProjectionMatrix();
-    cam.lookAt(eye.clone().add(v3(this.dirOf(this.look.yaw, this.look.pitch))));
+    const hm = this.region.hm;
+    if (this.mode === "above") {
+      // orbit around a point on the terrain; the camera doesn't dive under a hill
+      const O = this.orbit;
+      const tu = heightAt(hm, O.e, O.n);
+      const ce = Math.cos(O.pitch * DEG), se = Math.sin(O.pitch * DEG);
+      const P: Vec3 = [O.e - O.dist * ce * Math.sin(O.yaw * DEG), O.n - O.dist * ce * Math.cos(O.yaw * DEG), tu + O.dist * se];
+      if (Math.abs(P[0]) < hm.half && Math.abs(P[1]) < hm.half) P[2] = Math.max(P[2], heightAt(hm, P[0], P[1]) + 40);
+      this.camLocal = P;
+      cam.position.copy(v3(P));
+      cam.up.set(0, 1, 0);
+      cam.fov = ABOVE_FOV;
+      cam.near = Math.max(0.5, O.dist * 0.0005);
+      cam.updateProjectionMatrix();
+      cam.lookAt(v3([O.e, O.n, tu]));
+    } else {
+      this.camLocal = o.eye;
+      cam.position.copy(v3(o.eye));
+      cam.up.copy(v3(o.basis[2]));
+      cam.fov = this.look.fov;
+      cam.near = 0.5;
+      cam.updateProjectionMatrix();
+      cam.lookAt(v3(o.eye).add(v3(this.dirOf(this.look.yaw, this.look.pitch))));
+    }
     cam.updateMatrixWorld();
+    const eye = cam.position.clone();
     this.skyGroup.position.copy(eye);
     this.sun.lookAt(eye);
     this.glare.lookAt(eye);
-    if (this.terrainMat) this.terrainMat.uniforms.uCam.value.set(o.eye[0], o.eye[1], o.eye[2]);
+    // lens flare only from the observer's eye (disc share from the calculation)
+    this.glareMat.uniforms.uK.value = this.mode === "eye" ? this.sunFrac : 0;
+    if (this.terrainMat) {
+      const c = this.camLocal;
+      this.terrainMat.uniforms.uCam.value.set(c[0], c[1], c[2]);
+      this.terrainMat.uniforms.uAmbient.value = this.mode === "above" ? 0.0035 : 0.006;
+    }
     this.earthMat.uniforms.uSun.value.copy(v3(this.sunDir)).transformDirection(cam.matrixWorldInverse);
     this.renderer.render(this.scene, cam);
-    this.drawHud();
+    if (this.mode === "above") this.drawAbove();
+    else this.drawHud();
+  }
+
+  // view from above: compass, observer or rover, route vertices, sites
+  private drawAbove() {
+    const cv = this.overlay;
+    const ctx = cv.getContext("2d")!;
+    const dpr = window.devicePixelRatio || 1;
+    const w = cv.width / dpr, h = cv.height / dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    const o = this.obs!;
+    const inv = this.camera.matrixWorldInverse;
+    const ty = Math.tan((this.camera.fov * DEG) / 2), tx = ty * this.camera.aspect;
+    const proj = (p: Vec3): [number, number] | null => {
+      const q = v3(p).applyMatrix4(inv);
+      if (q.z > -1) return null;
+      const x = q.x / -q.z / tx, y = q.y / -q.z / ty;
+      return Math.abs(x) < 1.2 && Math.abs(y) < 1.2 ? [((x + 1) / 2) * w, ((1 - y) / 2) * h] : null;
+    };
+    const diamond = (x: number, y: number, r: number, fill: string | null, stroke: string) => {
+      ctx.beginPath();
+      ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y); ctx.closePath();
+      if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.lineWidth = 1;
+    };
+    ctx.font = `11px ${T.mono}`;
+    const label = (x: number, y: number, a: string, b: string | null, color: string) => {
+      const tw = Math.max(ctx.measureText(a).width, b ? ctx.measureText(b).width : 0);
+      const lx = x + 10 + tw > w - 6 ? x - 10 - tw : x + 10;
+      ctx.textAlign = "left";
+      ctx.fillStyle = "rgba(3, 7, 13, 0.6)";
+      ctx.fillRect(lx - 3, y - 12, tw + 6, b ? 28 : 16);
+      ctx.fillStyle = color;
+      ctx.fillText(a, lx, y);
+      if (b) {
+        ctx.fillStyle = T.muted;
+        ctx.fillText(b, lx, y + 12);
+      }
+    };
+
+    // catalog sites
+    for (const m of this.allMarks) {
+      const s = proj(m.p);
+      if (!s) continue;
+      diamond(s[0], s[1], 4, null, "rgba(227, 238, 245, 0.8)");
+      label(s[0], s[1] - 2, m.name, null, "rgba(227, 238, 245, 0.85)");
+    }
+    // route vertices: start is a filled diamond
+    this.waypoints.forEach((p, i) => {
+      const s = proj([p[0], p[1], p[2] + 2]);
+      if (s) diamond(s[0], s[1], 5, i === 0 ? T.text : T.bg, T.text);
+    });
+    // observer / rover: a post above the ground so it shows behind a slope
+    const g = o.eye[2] - EYE_M;
+    const base = proj([o.eye[0], o.eye[1], g]);
+    const topP = proj([o.eye[0], o.eye[1], g + Math.max(40, this.orbit.dist * 0.03)]);
+    if (base) {
+      if (topP) {
+        ctx.strokeStyle = T.both;
+        ctx.beginPath();
+        ctx.moveTo(base[0], base[1]);
+        ctx.lineTo(topP[0], topP[1]);
+        ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.arc(base[0], base[1], 5.5, 0, 2 * Math.PI);
+      ctx.fillStyle = this.seen.sun ? T.sun : T.bg;
+      ctx.fill();
+      ctx.strokeStyle = T.both;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.lineWidth = 1;
+      const at = topP ?? base;
+      label(at[0], at[1], this.obsLabel, this.seen.sun ? "in sunlight" : "in shadow", T.both);
+    }
+
+    // compass: top is where the camera looks; Sun and Earth on the rim by azimuth
+    const cx = w - 52, cy = 118, R = 28;
+    ctx.fillStyle = "rgba(3, 7, 13, 0.72)";
+    ctx.beginPath();
+    ctx.arc(cx, cy, R + 13, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(134, 201, 232, 0.45)";
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, 0, 2 * Math.PI);
+    ctx.stroke();
+    const at = (az: number, r: number): [number, number] => {
+      const a = (az - this.orbit.yaw) * DEG;
+      return [cx + Math.sin(a) * r, cy - Math.cos(a) * r];
+    };
+    ctx.font = `600 10px ${T.mono}`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    for (const [az, n] of [[0, "N"], [90, "E"], [180, "S"], [270, "W"]] as const) {
+      const [x, y] = at(az, R - 9);
+      ctx.fillStyle = n === "N" ? T.text : T.faint;
+      ctx.fillText(n, x, y);
+    }
+    const azOf = (d: Vec3) => Math.atan2(d[0], d[1]) / DEG;
+    for (const [d, col, seen] of [[this.sunDir, T.sun, this.seen.sun], [this.earthDir, T.earth, this.seen.earth]] as const) {
+      const [x, y] = at(azOf(d), R);
+      ctx.beginPath();
+      ctx.arc(x, y, 4.5, 0, 2 * Math.PI);
+      ctx.fillStyle = seen ? col : T.bg;
+      ctx.fill();
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.lineWidth = 1;
+    }
+    ctx.textBaseline = "alphabetic";
   }
 
   // azimuth scale at the top, true horizon line, site labels and arrows to the bodies
@@ -1018,7 +1426,7 @@ class Engine {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
     const o = this.obs!;
-    const eye = v3(o.eye);
+    const eye = this.camera.position.clone();
     const inv = this.camera.matrixWorldInverse;
     const ty = Math.tan((this.camera.fov * DEG) / 2), tx = ty * this.camera.aspect;
     const proj = (d: Vec3): [number, number, boolean] => {

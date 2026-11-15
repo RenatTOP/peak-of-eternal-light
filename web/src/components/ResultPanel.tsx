@@ -43,7 +43,7 @@ export function ResultPanel({ what, horizon, analysis, cursor, onCursor, onView3
       <Head num="03" label="RESULT" right={`for this ${what} and period`} />
       <div className="sub-title">
         {what === "route" ? "Horizon where the rover is now" : `Horizon from the ${what}`}
-        {onView3D && <button className="link-btn" onClick={onView3D}>Stand here in 3D →</button>}
+        {onView3D && <button className="link-btn" onClick={onView3D}>{what === "route" ? "Route in 3D →" : "Stand here in 3D →"}</button>}
       </div>
       <div className="sub-note">
         {wall > 6 ? `terrain rises to ${wall.toFixed(0)}° and hides the Sun much of the time`
