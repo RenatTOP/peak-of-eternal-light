@@ -103,7 +103,9 @@ interface SkyCardProps {
 function SkyCard({ body, color, on, state, alt, clear, event, now }: SkyCardProps) {
   const name = body === "sun" ? "Sun" : "Earth";
   // "Sunset in 47 d 5 h": don't break the countdown in the middle on a narrow screen
-  const [, lead = "", count = eventText(event, body, now)] = eventText(event, body, now).match(/^(.* in )(.+)$/) ?? [];
+  // ("No sunset before period end" has no countdown and wraps freely)
+  const text = eventText(event, body, now);
+  const [, lead, count] = text.match(/^(.* in )(.+)$/) ?? [text, text, ""];
   return (
     <div className={`sky-card${on ? "" : " off"}`} style={{ "--c": color } as CSSProperties}>
       <div className="state">

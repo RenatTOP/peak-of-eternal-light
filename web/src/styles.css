@@ -230,7 +230,9 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .map-earth { position: absolute; right: 16px; top: 18px; z-index: 500; display: flex; align-items: center; gap: 8px;
              font: 11px var(--mono); color: var(--earth); pointer-events: none;
              padding: 4px 8px; background: rgba(6, 16, 27, 0.85); }
-.chips { position: absolute; left: 14px; bottom: 14px; z-index: 500; display: flex; gap: 6px; flex-wrap: wrap; }
+.chips { position: absolute; left: 14px; right: 190px; bottom: 14px; z-index: 500; display: flex; gap: 6px; flex-wrap: wrap;
+         pointer-events: none; } /* right: room for .map-readout; on a narrow stage the chips wrap upwards */
+.chips .chip { pointer-events: auto; }
 .chip { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; background: rgba(6, 16, 27, 0.92);
         border: 1px solid var(--line); color: var(--muted); font-size: 12.5px; }
 .chip i { width: 8px; height: 8px; opacity: 0.5; }
@@ -420,6 +422,7 @@ button.crow.on { background: rgba(255, 181, 71, 0.08); border-left-color: var(--
   .topbar .share { height: 38px; min-width: 38px; }
   .date input { min-height: 40px; font-size: 16px; width: 172px; }
   .map-readout span { display: none; } /* no cursor coordinates without a mouse; the hint only gets in the way */
+  .chips { right: 90px; } /* the readout is only the scale bar here */
   .myear { grid-template-columns: 1fr; }
   .myear-label { border-top: 0; padding: 0 0 4px; }
   .mrow { min-height: 44px; grid-template-columns: 14px minmax(0, 1fr); }
@@ -485,6 +488,7 @@ button.crow.on { background: rgba(255, 181, 71, 0.08); border-left-color: var(--
 .trav-legend i.dash { background: repeating-linear-gradient(90deg, #3a5569 0 3px, transparent 3px 6px); }
 @media (max-width: 600px) {
   .route-bar > span { flex: 1 0 100%; margin: 0 0 2px; }
+  .chips { bottom: 34px; } /* the map attribution wraps to two lines here */
 }
 
 /* 3D view from a point */
