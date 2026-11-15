@@ -473,3 +473,34 @@ button.crow.on { background: rgba(255, 181, 71, 0.08); border-left-color: var(--
 @media (max-width: 600px) {
   .route-bar > span { flex: 1 0 100%; margin: 0 0 2px; }
 }
+
+/* 3D view from a point */
+.link-btn { background: none; border: 0; padding: 0; margin-left: 10px; color: var(--brk); font-size: 12px; font-weight: 500; }
+.link-btn:hover { color: var(--text); text-decoration: underline; }
+.view3d { position: absolute; inset: 0; background: #000; overflow: hidden; border: 1px solid var(--line); }
+.view3d-gl, .view3d-hud { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.view3d-hud { cursor: grab; touch-action: none; }
+.view3d-hud:active { cursor: grabbing; }
+.view3d-hud:focus-visible { outline-offset: -3px; }
+.v3-title { position: absolute; left: 14px; top: 38px; display: flex; flex-direction: column; gap: 3px; pointer-events: none;
+            font-size: 11.5px; text-shadow: 0 0 4px #000, 0 0 2px #000; }
+.v3-title b { font-size: 12px; letter-spacing: 0.14em; font-weight: 600; }
+.v3-tools { position: absolute; right: 14px; top: 38px; display: flex; gap: 6px; }
+.v3-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.v3-readout { position: absolute; left: 14px; bottom: 44px; display: flex; flex-direction: column; gap: 6px; padding: 8px 12px;
+              background: rgba(3, 7, 13, 0.72); border: 1px solid var(--line); font: 12px var(--mono); pointer-events: none; }
+.v3-readout div { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.v3-foot { position: absolute; left: 14px; right: 14px; bottom: 12px; display: flex; justify-content: space-between; gap: 16px;
+           font-size: 10.5px; color: var(--muted); pointer-events: none; text-shadow: 0 0 3px #000; }
+.v3-foot span:last-child { text-align: right; }
+.v3-load { padding: 18px 22px; display: flex; flex-direction: column; gap: 12px; }
+.v3-load b { font-size: 13px; letter-spacing: 0.08em; }
+.v3-load p { margin: 0; }
+.v3-bar { height: 3px; background: var(--line); }
+.v3-bar i { display: block; height: 100%; background: var(--brk); transition: width 0.2s; }
+@media (max-width: 960px) {
+  .v3-title { top: 34px; left: 10px; }
+  .v3-tools { top: auto; bottom: 10px; right: 10px; }
+  .v3-readout { left: 10px; bottom: 64px; font-size: 11px; }
+  .v3-foot { display: none; }
+}

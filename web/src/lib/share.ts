@@ -9,7 +9,7 @@ export type ShareDrive = "continuous" | "battery" | "batteryEarth";
 
 export interface ShareState {
   tab: ShareTab;
-  stage: "globe" | "map";
+  stage: "globe" | "map" | "view";
   site: string | null;
   point: [number, number] | null; // lat, lon
   start: number; // unix ms
@@ -58,7 +58,7 @@ export function encodeShare(s: ShareState): string {
   const q: [string, string][] = [];
   const d = SHARE_DEFAULTS;
   if (s.tab !== d.tab) q.push(["tab", s.tab]);
-  if (s.tab === "explore" && s.stage !== d.stage) q.push(["view", s.stage]);
+  if (s.tab === "explore" && s.stage !== d.stage) q.push(["view", s.stage === "view" ? "3d" : s.stage]);
   if (s.route) {
     q.push(["route", s.route.way.map(([la, lo]) => `${r(la, 5)},${r(lo, 4)}`).join(";")]);
     if (s.route.pins) q.push(["pins", s.route.pins.join(",")]);
@@ -95,6 +95,7 @@ export function decodeShare(hash: string): Partial<ShareState> {
   if (tab && TABS.includes(tab)) out.tab = tab;
   const view = p.get("view");
   if (view === "map" || view === "globe") out.stage = view;
+  else if (view === "3d") out.stage = "view";
   const site = p.get("site");
   if (site && /^[a-z0-9-]{1,64}$/.test(site)) out.site = site;
   const pt = p.get("pt")?.split(",").map(Number);

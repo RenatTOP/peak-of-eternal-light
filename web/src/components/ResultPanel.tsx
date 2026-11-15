@@ -21,9 +21,10 @@ interface Props {
   analysis: Analysis;
   cursor: number;
   onCursor: (i: number) => void;
+  onView3D?: (() => void) | null; // open the 3D view from this point
 }
 
-export function ResultPanel({ what, horizon, analysis, cursor, onCursor }: Props) {
+export function ResultPanel({ what, horizon, analysis, cursor, onCursor, onView3D }: Props) {
   const [tab, setTab] = useState<WinKey>("sunAndEarth");
   const s = analysis.series;
   const i = Math.min(Math.max(cursor, 0), s.t.length - 1);
@@ -40,7 +41,10 @@ export function ResultPanel({ what, horizon, analysis, cursor, onCursor }: Props
   return (
     <Panel className="right scroll">
       <Head num="03" label="RESULT" right={`for this ${what} and period`} />
-      <div className="sub-title">{what === "route" ? "Horizon where the rover is now" : `Horizon from the ${what}`}</div>
+      <div className="sub-title">
+        {what === "route" ? "Horizon where the rover is now" : `Horizon from the ${what}`}
+        {onView3D && <button className="link-btn" onClick={onView3D}>Stand here in 3D →</button>}
+      </div>
       <div className="sub-note">
         {wall > 6 ? `terrain rises to ${wall.toFixed(0)}° and hides the Sun much of the time`
                   : "terrain to 300 km · amber: Sun’s path, blue: Earth"}

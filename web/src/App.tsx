@@ -16,6 +16,7 @@ import { LandingCard } from "./components/LandingCard";
 import { landingScan, type LandingDay } from "./lib/landing";
 import { decodeShare, encodeShare, SHARE_DEFAULTS, type ShareState } from "./lib/share";
 import type { PointHorizon } from "./lib/anypoint";
+import type { Landmark, ViewReadout, ViewTarget } from "./components/SiteView3D";
 import { analyze, computeSeries, computeTrack, latLonToXY, xyToLatLon, type Analysis, type Horizon, type Observer } from "./lib/astro";
 import { loadAppData, loadClones, loadVisMap, type AppData, type LoadStep, type Mission, type SiteInfo } from "./lib/data";
 import { batteryNeeded, generation, POWER_PRESETS, simulate, type PowerConfig } from "./lib/power";
@@ -31,6 +32,7 @@ type Vec3 = [number, number, number];
 
 // three.js is needed only by the globe: separate chunk
 const Globe = lazy(() => import("./components/Globe").then((m) => ({ default: m.Globe })));
+const SiteView3D = lazy(() => import("./components/SiteView3D"));
 
 function run(data: AppData, obs: Observer, horizon: Horizon, start: number, days: number): Analysis {
   const end = Math.min(start + days * DAY_MS, data.ephem.end);
@@ -104,7 +106,7 @@ export default function App() {
   const [loaded, setLoaded] = useState<Set<LoadStep>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("explore");
-  const [stage, setStage] = useState<"globe" | "map">("globe");
+  const [stage, setStage] = useState<"globe" | "map" | "view">("globe");
   // the map is created on first visit, then only hidden
   const [mapSeen, setMapSeen] = useState(false);
   if (stage === "map" && !mapSeen) setMapSeen(true);
@@ -416,7 +418,7 @@ export default function App() {
     setPicked(null);
     setRoute(null);
     setTab("explore");
-    setStage("map");
+    setStage((s) => (s === "view" ? "view" : "map"));
   };
   const pickXY = (x: number, y: number) => {
     if (!data) return;
@@ -546,7 +548,7 @@ export default function App() {
       setRoute(null);
     }
     setTab(s.tab);
-    setStage(s.route || s.point ? "map" : s.stage);
+    setStage(s.stage === "view" ? "view" : s.route || s.point ? "map" : s.stage);
     pendingAt.current = s.at === null ? null : { t: s.at, what };
   };
   const applyRef = useRef(applyShare);
@@ -557,6 +559,10 @@ export default function App() {
     setTab("explore");
     setStage("globe");
   };
+
+  // catalog sites: labels in the 3D view
+  const landmarks = useMemo((): Landmark[] => (data?.sites ?? []).map((s) => ({ id: s.id, name: s.name, x: s.x, y: s.y, groundZ: s.ground_z })),
+                            [data]);
 
   if (!data) return <Boot done={loaded} error={error} />;
   const missionsList = data.missions?.missions ?? NO_MISSIONS;
@@ -671,6 +677,23 @@ export default function App() {
   const mapRoute = route && mapRouteBase ? { ...mapRouteBase, fitKey: routeFit, rover: roverPt && { x: roverPt.x, y: roverPt.y } } : null;
   const hideSel = !!picked || !!route;
 
+  // 3D view: who is looking (place, point or rover at the cursor) and the same numbers as RESULT
+  const viewTarget: ViewTarget | null = !view ? null
+    : view.what === "route" && trav && roverPt
+      ? { kind: "route", name: "Rover", x: roverPt.x, y: roverPt.y, groundZ: trav.rh.ground[trav.run.idx[iNow]], route: trav.rh.pts }
+    : view.what === "point" && picked?.point
+      ? { kind: "point", name: "Selected point", x: picked.x, y: picked.y, groundZ: picked.point.groundZ }
+    : view.what === "site" && selected
+      ? { kind: "site", name: selected.name, x: selected.x, y: selected.y, groundZ: selected.ground_z }
+    : null;
+  const sNow = view?.analysis.series;
+  const readout: ViewReadout | null = sNow && horizonNow && n ? {
+    sunFrac: sNow.sunFrac[iNow], sunClear: sNow.sunAlt[iNow] - horizonNow.at(sNow.sunAz[iNow]),
+    earthFrac: sNow.earthFrac[iNow], earthClear: sNow.earthAlt[iNow] - horizonNow.at(sNow.earthAz[iNow]),
+  } : null;
+  const can3d = !!viewTarget && !!data.anyPoint;
+  const open3d = can3d ? () => { setPlaying(false); setStage("view"); } : null;
+
   return (
     <div className="app">
       <Header tab={tab} onTab={setTab} clock={clock} onShare={share} />
@@ -709,13 +732,48 @@ export default function App() {
                         picked={picked && { x: picked.x, y: picked.y }}
                         pickedTag={picked ? { title: "SELECTED POINT", line: `${fmtLat(picked.lat)} ${fmtLon(picked.lon)}` } : null}
                         pickedLink={picked?.status === "ok" && nearest[0] ? { x: nearest[0].s.x, y: nearest[0].s.y } : null}
-                        missions={missionsList} route={mapRoute} onRoute={onRoute} />
+                        missions={missionsList} route={mapRoute} onRoute={onRoute} onView3D={route?.drawing ? null : open3d} />
+            </div>
+          )}
+          {stage === "view" && (
+            <div className="stage-layer">
+              {viewTarget && data.anyPoint ? (
+                <ErrorBoundary fallback={() => (
+                  <div className="stage-card">
+                    <Panel>
+                      <Head label="3D VIEW UNAVAILABLE" />
+                      <h3>This browser could not start the 3D view</h3>
+                      <p>WebGL 2 is turned off or not supported here. The map, the horizon panel and every calculation work without it.</p>
+                      <div className="btn-row">
+                        <button className="btn primary" onClick={() => setStage("map")}>Open the polar map</button>
+                      </div>
+                    </Panel>
+                  </div>
+                )}>
+                  <Suspense fallback={null}>
+                    <SiteView3D ephem={data.ephem} anyPoint={data.anyPoint} target={viewTarget} t={clock ?? start}
+                                readout={readout} landmarks={landmarks} onClose={() => setStage("map")} />
+                  </Suspense>
+                </ErrorBoundary>
+              ) : !card && (
+                <div className="stage-card">
+                  <Panel>
+                    <Head label="3D VIEW" />
+                    <h3>Pick a place to stand</h3>
+                    <p>Choose a site, click any spot on the polar map, or plan a rover route — then look around from there.</p>
+                    <div className="btn-row">
+                      <button className="btn primary" onClick={() => setStage("map")}>Open the polar map</button>
+                    </div>
+                  </Panel>
+                </div>
+              )}
             </div>
           )}
           {card}
         </div>
         {view && horizonNow && <ResultPanel what={view.what} horizon={horizonNow} analysis={view.analysis} cursor={cursor}
-                              onCursor={(i) => { setPlaying(false); setCursor(i); }} />}
+                              onCursor={(i) => { setPlaying(false); setCursor(i); }}
+                              onView3D={stage === "view" ? null : open3d} />}
         {tab === "explore" && timebar}
       </main>
       {tab === "compare" && (

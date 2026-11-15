@@ -25,6 +25,7 @@ interface Props {
   onSelect: (id: string) => void;
   onPick: (x: number, y: number) => void;
   onGlobe: () => void;
+  onView3D: (() => void) | null; // 3D view from the chosen place, point or rover
   picked: { x: number; y: number } | null;
   pickedTag: MapTag | null;
   pickedLink: { x: number; y: number } | null; // nearest catalog site
@@ -375,6 +376,14 @@ export function PolarMap(props: Props) {
             <circle cx="2" cy="12" r="1.6" fill="currentColor" /><circle cx="12" cy="2" r="1.6" fill="currentColor" />
           </svg>
           Route
+        </button>
+        <button className="tool" disabled={!props.onView3D} onClick={() => props.onView3D?.()}
+                title="Stand at the selected place and look around in 3D">
+          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+            <path d="M1 12 L5 5 L8 9 L10 7 L13 12 Z" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+            <circle cx="11" cy="3" r="1.6" fill="currentColor" />
+          </svg>
+          3D view
         </button>
         <button className="tool" aria-label="Zoom in" onClick={() => zoom(1)}>+</button>
         <button className="tool" aria-label="Zoom out" onClick={() => zoom(-1)}>−</button>
